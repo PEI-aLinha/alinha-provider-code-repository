@@ -1,7 +1,7 @@
 package pt.alinha.coderepository.api
 
 /**
- * Contrato «api» deste plugin: a ÚNICA forma síncrona de outros plugins
- * lhe pedirem dados. Tudo o resto em pt.alinha.coderepository.internal é privado.
+ * This plugin's «api» contract: the ONLY synchronous way for other plugins
+ * to ask it for data. Everything under pt.alinha.coderepository.internal is private.
  */
 interface CodeRepositoryApi

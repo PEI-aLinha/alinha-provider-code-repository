@@ -2,20 +2,22 @@ import { definePlugin } from '@alinha/plugin-sdk'
 import { CodeRepositoryPage } from './pages/CodeRepositoryPage'
 
 /**
- * Ponto de entrada do plugin no frontend. O shell lê este objeto e monta
- * as rotas e o menu — não há nada a registar à mão no shell.
+ * The plugin's frontend entry point. The shell reads this object and mounts
+ * the routes and the menu — nothing to register by hand in the shell.
  *   area 'client'     → /org/:org/<path>
  *   area 'consultant' → /carteira/<path>
+ * User-visible text (title, label) and paths are in Portuguese, plain language
+ * (UI requirement in the technical report).
  */
 export default definePlugin({
   id: 'code-repository',
   name: 'Code Repository',
   routes: {
     client: [
-      { path: 'code-repository', handle: { title: 'Code Repository' }, Component: CodeRepositoryPage },
+      { path: 'integracoes/repositorio-codigo', handle: { title: 'Repositório de código' }, Component: CodeRepositoryPage },
     ],
   },
   nav: [
-    { label: 'Code Repository', path: 'code-repository', area: 'client' },
+    { label: 'Repositório de código', path: 'integracoes/repositorio-codigo', area: 'client' },
   ],
 })

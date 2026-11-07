@@ -1,2 +1,2 @@
--- Schema próprio do plugin Code Repository. Nenhum outro módulo lê estas tabelas.
+-- Own schema of the Code Repository plugin. No other module reads these tables.
 create schema if not exists coderepository;

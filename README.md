@@ -1,49 +1,50 @@
 # Code Repository
 
-Plugin **provider** da [aLinha](https://github.com/PEI-aLinha/alinha). Vive no repo principal como
-submodule em `plugins/provider/code-repository` e é compilado junto com o Core num único deployable.
+**provider** plugin of [aLinha](https://github.com/PEI-aLinha/alinha). It lives in the main repo as a
+submodule at `plugins/provider/code-repository` and is built together with the core into a single deployable.
 
 ```
-backend/    Kotlin — módulo Spring Modulith pt.alinha.coderepository
-  api/        contrato «api» (único acesso síncrono de outros plugins)
-  events/     eventos publicados
-  internal/   tudo o resto — privado
-  resources/db/migration/coderepository/   migrações Flyway (schema coderepository)
-frontend/   React — @alinha/plugin-code-repository (rotas + menu, lidos pelo shell)
-worker/     Python — collector (só em providers)
+backend/    Kotlin — Spring Modulith module pt.alinha.coderepository
+  api/        «api» contract (the only synchronous access for other plugins)
+  events/     published events
+  internal/   everything else — private
+  resources/db/migration/coderepository/   Flyway migrations (schema coderepository)
+frontend/   React — @alinha/plugin-code-repository (routes + menu, read by the shell)
+worker/     Python — collector (providers only)
 plugin.yaml manifest
 ```
 
-## Desenvolver
+## Development
 
-Este repo **não compila sozinho**. Trabalha-se dentro do checkout do repo principal:
+This repo **does not build on its own**. Work inside a checkout of the main repo:
 
 ```bash
 git clone --recurse-submodules git@github.com:PEI-aLinha/alinha.git
 cd alinha/plugins/provider/code-repository
-git switch -c feat/<tema>
-# ... código ...
-git push -u origin feat/<tema>      # PR neste repo
+git switch -c feat/<topic>
+# ... code ...
+git push -u origin feat/<topic>      # PR in this repo
 ```
 
-Correr testes (a partir da raiz do repo principal):
+Run the tests (from the main repo root):
 
 ```bash
-./gradlew :code-repository:test :app:test              # testes do plugin + verificação de módulos
+./gradlew :code-repository:test :app:test              # plugin tests + module verification
 pnpm --filter @alinha/plugin-code-repository typecheck
 ```
 
-## Regras
+## Rules
 
-- Backend: só usar `pt.alinha.pluginapi`, as named interfaces do Core (`core.tenant`, `core.access`,
-  `core.audit`, `core.jobs`, `core.compliance`, `core.aigateway`) e o `api`/`events` de outros plugins.
-- Frontend: só importar `@alinha/plugin-sdk`, `@alinha/ui`, `@alinha/api-client`.
-- Migrações: `V<yyyyMMddHHmmss>__<descricao>.sql` (timestamp evita colisões entre plugins).
-- Manter `plugin.yaml` e `*Plugin.kt` iguais (eventos publicados/consumidos, permissões).
+- Code, comments and commits in English; user-visible UI text in Portuguese.
+- Backend: only use `pt.alinha.pluginapi`, the core's named interfaces (`core.tenant`, `core.access`,
+  `core.audit`, `core.jobs`, `core.compliance`, `core.aigateway`) and other plugins' `api`/`events`.
+- Frontend: only import `@alinha/plugin-sdk`, `@alinha/ui`, `@alinha/api-client`.
+- Migrations: `V<yyyyMMddHHmmss>__<description>.sql` (the timestamp avoids collisions between plugins).
+- Keep `plugin.yaml` and `*Plugin.kt` in sync (published/consumed events, permissions).
 
 ## Definition of Done
 
-- [ ] Endpoints com `@RequiresPermission`
-- [ ] Escritas com Audit Trail na mesma transação
-- [ ] Queries filtradas pelo `TenantContext`
-- [ ] Testes a passar e CI verde (inclui `ModularityTest` do repo principal)
+- [ ] Endpoints have `@RequiresPermission`
+- [ ] Writes go to the Audit Trail in the same transaction
+- [ ] Queries are filtered by `TenantContext`
+- [ ] Tests pass and CI is green (including the main repo's `ModularityTest`)

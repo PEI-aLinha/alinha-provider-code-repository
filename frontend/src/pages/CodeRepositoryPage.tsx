@@ -11,7 +11,7 @@ export function CodeRepositoryPage() {
 
   return (
     <>
-      <PageHeader title="Code Repository" />
+      <PageHeader title="Repositório de código" />
       <p>Backend: {ping.isPending ? 'a verificar…' : ping.isError ? 'indisponível' : ping.data.status}</p>
     </>
   )
