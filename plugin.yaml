@@ -1,0 +1,10 @@
+# Manifest do plugin — manter igual a CodeRepositoryPlugin.kt (backend).
+id: code-repository
+name: "Code Repository"
+kind: provider
+version: 0.1.0
+# Onde este repo fica como submodule dentro do repo principal (PEI-aLinha/alinha)
+path: plugins/provider/code-repository
+publishes: []     # eventos que publica (ex.: AssessmentSubmitted)
+consumes: []      # eventos que consome
+permissions: []   # recursos RBAC (ex.: assessment:read, assessment:edit)
