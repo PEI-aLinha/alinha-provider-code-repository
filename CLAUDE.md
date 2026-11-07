@@ -31,7 +31,7 @@ backend/src/main/kotlin/pt/alinha/coderepository/
 backend/src/main/resources/db/migration/coderepository/   Flyway, schema "coderepository"
 frontend/src/index.ts      definePlugin({ id: 'code-repository', routes, nav }) — read by the shell
 frontend/src/pages/        React pages
-worker/                    Python collector (providers only), installed into the worker runtime
+worker/                    Python collector (tests: pytest; CI installs worker[dev]), installed into the worker runtime
 plugin.yaml                manifest: id, kind, version, path, publishes, consumes, permissions
 ```
 
