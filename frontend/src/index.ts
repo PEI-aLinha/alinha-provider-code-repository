@@ -1,4 +1,5 @@
 import { definePlugin } from '@alinha/plugin-sdk'
+import { GitBranch } from 'lucide-react'
 import { CodeRepositoryPage } from './pages/CodeRepositoryPage'
 
 /**
@@ -18,6 +19,6 @@ export default definePlugin({
     ],
   },
   nav: [
-    { label: 'Repositório de código', path: 'integrations/code-repository', area: 'client' },
+    { label: 'Repositório de código', path: 'integrations/code-repository', area: 'client', icon: GitBranch, order: 70 },
   ],
 })
