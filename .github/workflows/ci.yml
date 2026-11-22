@@ -19,4 +19,5 @@ jobs:
       plugin-path: plugins/provider/code-repository
       gradle-project: code-repository
       npm-package: "@alinha/plugin-code-repository"
+      main-ref: feat/plugin-sonar-analysis
     secrets: inherit   # ALINHA_READ_TOKEN (private repos only), SONAR_TOKEN
