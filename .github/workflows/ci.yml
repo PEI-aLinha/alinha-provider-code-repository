@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   ci:
-    uses: PEI-aLinha/alinha/.github/workflows/plugin-ci.yml@main
+    uses: PEI-aLinha/alinha/.github/workflows/plugin-ci.yml@feat/plugin-sonar-analysis
     with:
       plugin-path: plugins/provider/code-repository
       gradle-project: code-repository
