@@ -14,8 +14,11 @@ permissions:
 
 jobs:
   ci:
-    uses: PEI-aLinha/alinha/.github/workflows/plugin-ci.yml@main
+    # Coordinated change with PEI-aLinha/alinha (plugin-api, OpenAPI contract, pnpm-lock.yaml): test against the
+    # main repo's branch of the same name. Back to @main, without main-ref, before merging.
+    uses: PEI-aLinha/alinha/.github/workflows/plugin-ci.yml@feat/code-repository-provider
     with:
+      main-ref: feat/code-repository-provider
       plugin-path: plugins/provider/code-repository
       gradle-project: code-repository
       npm-package: "@alinha/plugin-code-repository"
