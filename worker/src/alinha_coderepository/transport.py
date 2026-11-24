@@ -1,13 +1,18 @@
 """Minimal read-only HTTP client (stdlib only: the plugin CI installs no runtime dependencies)."""
 from __future__ import annotations
 
+import http.client
+import ipaddress
 import json
+import re
+import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
+from urllib.parse import urlsplit
 
-from alinha_job_consumer.collectors import TransientError
+from alinha_job_consumer.collectors import CollectorError, TransientError
 
 TIMEOUT_S = 10.0
 # Larger answers are refused: collected data is untrusted and the job result is capped at 1 MiB.
@@ -64,3 +69,70 @@ def _read(answer: Any) -> bytes:
 
 def _lower(items: Any) -> dict[str, str]:
     return {key.lower(): value for key, value in items}
+
+
+# -- self-managed hosts (the tenant types the address) -----------------------------------------------------------
+
+_HOSTNAME = re.compile(r"(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}")
+
+
+def self_managed_base(url: str) -> tuple[str, str, int]:
+    """`https://host[:port]` and nothing else (no user, path, query or IP literal). Returns (base, host, port)."""
+    parts = urlsplit(url)
+    try:
+        port = parts.port or 443
+    except ValueError:
+        raise CollectorError("invalid_scope", "the server address has an invalid port") from None
+    host = parts.hostname or ""
+    if (parts.scheme != "https" or parts.username or parts.password or parts.path not in ("", "/")
+            or parts.query or parts.fragment or not _HOSTNAME.fullmatch(host)):
+        raise CollectorError("invalid_scope", "the server address must be https://<host>[:port]")
+    return f"https://{host}" + ("" if port == 443 else f":{port}"), host.lower(), port
+
+
+def public_address(host: str, port: int, resolve: Callable[..., Any] = socket.getaddrinfo) -> str:
+    """Resolves [host] once and refuses it unless EVERY address is public (no SSRF into the platform's network)."""
+    try:
+        infos = resolve(host, port, type=socket.SOCK_STREAM)
+    except OSError as error:
+        raise TransientError("provider host does not resolve") from error
+    addresses = [info[4][0] for info in infos]
+    if not addresses or not all(ipaddress.ip_address(a.split("%", 1)[0]).is_global for a in addresses):
+        raise CollectorError("host_not_allowed", "the server address is not a public internet address")
+    return addresses[0]
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """Connects to the address checked by [public_address] (no second lookup, so no DNS rebinding) with TLS
+    verified against the host name."""
+
+    def __init__(self, host: str, port: int, address: str, timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self._address = address
+
+    def connect(self) -> None:
+        sock = socket.create_connection((self._address, self.port), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def pinned_get(base_url: str, resolve: Callable[..., Any] = socket.getaddrinfo) -> Get:
+    """A [Get] for one self-managed server: only URLs under [base_url], to its public address, never redirected."""
+    base, host, port = self_managed_base(base_url)
+    address = public_address(host, port, resolve)
+
+    def get(url: str, headers: Mapping[str, str]) -> Response:
+        if not url.startswith(base + "/"):
+            raise ValueError("request outside the connected server")
+        target = url[len(base):]
+        connection = _PinnedHTTPSConnection(host, port, address, TIMEOUT_S)
+        try:
+            connection.request("GET", target, headers=dict(headers))
+            answer = connection.getresponse()  # http.client never follows redirects
+            body = _read(answer) if answer.status == 200 else b""
+            return Response(answer.status, _lower(answer.getheaders()), body)
+        except (OSError, http.client.HTTPException) as error:
+            raise TransientError("provider unreachable") from error
+        finally:
+            connection.close()
+
+    return get
