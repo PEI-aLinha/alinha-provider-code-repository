@@ -6,24 +6,38 @@ import { ConnectForm, validate } from './ConnectForm'
 import type { Connection } from './types'
 
 const CONNECTION: Connection = {
-  host: 'github', account: 'acme', repositories: ['acme/api'], status: 'ACTIVE', lastError: null,
+  host: 'github', auth: 'token', baseUrl: null, account: 'acme', repositories: ['acme/api'], status: 'ACTIVE', lastError: null,
   lastCollectedAt: '2026-11-24T10:00:00Z', truncated: false, connectedAt: '2026-11-24T09:00:00Z',
 }
 
 const type = (label: RegExp | string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } })
 
+const input = (overrides: Partial<Parameters<typeof validate>[0]> = {}) =>
+  ({ host: 'github' as const, account: 'acme', repositories: [] as string[], token: 'ghp', baseUrl: '', ...overrides })
+
 describe('validate', () => {
   it('accepts an account, its repositories and a token', () => {
-    expect(validate('acme', ['acme/api', 'ACME/web'], 'ghp', true)).toEqual({})
+    expect(validate(input({ repositories: ['acme/api', 'ACME/web'] }), true)).toEqual({})
   })
 
   it('names every invalid field', () => {
-    expect(Object.keys(validate('acme/x', ['other/api'], '', true))).toEqual(['account', 'repositories', 'token'])
+    expect(Object.keys(validate(input({ account: 'acme/x', repositories: ['other/api'], token: '' }), true)))
+      .toEqual(['account', 'repositories', 'token'])
   })
 
   it('allows no token when one is already stored, and at most 20 repositories', () => {
-    expect(validate('acme', [], '', false)).toEqual({})
-    expect(validate('acme', Array.from({ length: 21 }, (_, i) => `acme/r${i}`), 't', false)).toHaveProperty('repositories')
+    expect(validate(input({ token: '' }), false)).toEqual({})
+    expect(validate(input({ repositories: Array.from({ length: 21 }, (_, i) => `acme/r${i}`) }), false)).toHaveProperty('repositories')
+  })
+
+  it('accepts GitLab groups with subgroups and their projects', () => {
+    expect(validate(input({ host: 'gitlab', account: 'acme/team', repositories: ['acme/team/web', 'acme/team/infra/db'] }), true))
+      .toEqual({})
+    expect(validate(input({ host: 'gitlab', account: 'acme/team', repositories: ['acme/other'] }), true)).toHaveProperty('repositories')
+  })
+
+  it.each(['http://git.acme.pt', 'https://git', 'https://git.acme.pt/api'])('refuses the GitLab server %s', (baseUrl) => {
+    expect(validate(input({ host: 'gitlab', baseUrl }), true)).toHaveProperty('baseUrl')
   })
 })
 
@@ -65,6 +79,34 @@ describe('ConnectForm', () => {
 
     await waitFor(() => expect(api).toHaveBeenCalled())
     expect(JSON.parse((vi.mocked(api).mock.calls[0][1] as RequestInit).body as string)).not.toHaveProperty('token')
+  })
+
+  it('connects a self-managed GitLab group with its own instructions', async () => {
+    const api = vi.fn(async () => CONNECTION) as PluginHost['api']
+    renderWithHost(<ConnectForm onDone={vi.fn()} />, { host: { api } })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'GitLab' }))
+    expect(screen.getByText(/read_api/)).toBeInTheDocument()
+    type(/Servidor GitLab/, 'https://gitlab.acme.pt')
+    type(/Grupo ou utilizador/, 'acme/team')
+    type(/Token de acesso/, 'glpat')
+    fireEvent.click(screen.getByRole('button', { name: 'Ligar e recolher' }))
+
+    await waitFor(() => expect(api).toHaveBeenCalled())
+    expect(JSON.parse((vi.mocked(api).mock.calls[0][1] as RequestInit).body as string)).toEqual(
+      { host: 'gitlab', account: 'acme/team', repositories: [], baseUrl: 'https://gitlab.acme.pt', token: 'glpat' },
+    )
+  })
+
+  it('asks for a new token when moving to another platform or leaving the GitHub App', () => {
+    const { unmount } = renderWithHost(<ConnectForm current={CONNECTION} onDone={vi.fn()} />)
+    expect(screen.getByText('Deixe em branco para manter o token guardado.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('radio', { name: 'GitLab' }))
+    expect(screen.getByText(/Nunca o voltamos a mostrar/)).toBeInTheDocument()
+    unmount()
+
+    renderWithHost(<ConnectForm current={{ ...CONNECTION, auth: 'app' }} onDone={vi.fn()} />)
+    expect(screen.getByText(/Nunca o voltamos a mostrar/)).toBeInTheDocument()
   })
 
   it('shows the server field errors and other errors', async () => {

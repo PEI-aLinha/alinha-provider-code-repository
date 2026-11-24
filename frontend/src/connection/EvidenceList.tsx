@@ -1,6 +1,6 @@
 import { CircleCheck, CircleHelp, CircleX } from 'lucide-react'
 import { Badge, Card, Eyebrow } from '@alinha/ui'
-import { CHECK_LABEL, CHECK_WHY, detailText, OUTCOME_LABEL } from './labels'
+import { CHECK_LABEL, CHECK_WHY, detailText, OUTCOME_LABEL, STRENGTH_LABEL } from './labels'
 import type { Evidence } from './types'
 
 const ICON = {
@@ -30,7 +30,14 @@ export function EvidenceList({ evidence }: { evidence: Evidence[] }) {
                     <p className="text-[0.8125rem] text-muted">{CHECK_WHY[item.check]}</p>
                     {detail && <p className="mt-1 text-[0.8125rem] text-ink-soft">{detail}</p>}
                     {item.outcome === 'UNKNOWN' && (
-                      <p className="mt-1 text-[0.8125rem] text-ink-soft">O token não tem permissão para ver esta definição.</p>
+                      <p className="mt-1 text-[0.8125rem] text-ink-soft">
+                        {item.details.reason === 'not_available'
+                          ? 'Não está disponível no plano da plataforma, ou o acesso não permite vê-la.'
+                          : 'O acesso dado não tem permissão para ver esta definição.'}
+                      </p>
+                    )}
+                    {item.outcome !== 'UNKNOWN' && STRENGTH_LABEL[item.strength] && (
+                      <p className="mt-1 text-[0.75rem] text-muted">{STRENGTH_LABEL[item.strength]}</p>
                     )}
                   </div>
                   <Badge tone={TONE[item.outcome]} icon={ICON[item.outcome]}>{OUTCOME_LABEL[item.outcome]}</Badge>
