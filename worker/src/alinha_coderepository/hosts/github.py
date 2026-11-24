@@ -1,12 +1,12 @@
-"""GitHub (github.com) with a fine-grained personal access token, read-only.
+"""GitHub (github.com), read-only, through the aLinha GitHub App or a fine-grained personal access token.
 
-Token permissions (all "Read-only"): Metadata, Administration, Dependabot alerts, Secret scanning alerts.
+Permissions (all "Read-only"): Metadata, Administration, Dependabot alerts, Secret scanning alerts.
 A missing permission makes the matching check UNKNOWN, never FAIL.
 """
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from urllib.parse import quote
 
 from alinha_job_consumer.collectors import CollectorError, TransientError
@@ -21,12 +21,21 @@ _ACCOUNT = re.compile(r"[A-Za-z0-9-]{1,39}")
 _BLOCKING_SEVERITIES = "critical,high"
 _PAGE = 100
 
+# installation id -> installation access token
+AppToken = Callable[[str], str]
+
 
 class GitHub:
     NAME = "github"
 
-    def __init__(self, credential: Mapping[str, str], get: Get) -> None:
-        token = credential.get("token", "")
+    def __init__(self, credential: Mapping[str, str], get: Get, app_token: AppToken | None = None) -> None:
+        self._app = credential.get("auth") == "app"
+        if self._app:
+            if app_token is None:
+                raise CollectorError("provider_not_configured", "the GitHub App is not configured on this platform")
+            token = app_token(credential.get("installationId", ""))
+        else:
+            token = credential.get("token", "")
         if not token:
             raise CollectorError("invalid_credentials", "no token is stored for this connection")
         self._get = get
@@ -45,8 +54,13 @@ class GitHub:
         found: list[str] = []
         page = 1
         while len(found) < limit:
-            answer = self._call(f"/user/repos?per_page={_PAGE}&page={page}&sort=full_name")
-            items = answer.json() if answer.status == 200 else None
+            if self._app:  # the repositories the client chose when installing the App
+                answer = self._call(f"/installation/repositories?per_page={_PAGE}&page={page}")
+                body = answer.json() if answer.status == 200 else None
+                items = body.get("repositories") if isinstance(body, dict) else None
+            else:
+                answer = self._call(f"/user/repos?per_page={_PAGE}&page={page}&sort=full_name")
+                items = answer.json() if answer.status == 200 else None
             if not isinstance(items, list):
                 raise CollectorError("no_repositories", "the token cannot list repositories")
             for item in items:

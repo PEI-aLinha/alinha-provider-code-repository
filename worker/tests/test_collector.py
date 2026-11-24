@@ -88,7 +88,7 @@ def test_invalid_scope_is_a_final_error(scope):
 
 def test_unsupported_host_is_a_final_error():
     with pytest.raises(CollectorError) as error:
-        collect(job(host="gitlab"), read_secret=secret, get=FakeGitHub())
+        collect(job(host="bitbucket"), read_secret=secret, get=FakeGitHub())
 
     assert error.value.code == "unsupported_host"
 
@@ -99,3 +99,40 @@ def test_rejects_a_job_for_another_provider():
 
     with pytest.raises(CollectorError):
         collect(other, read_secret=secret, get=FakeGitHub())
+
+
+def test_collects_a_gitlab_group():
+    from fake_gitlab import FakeGitLab, protected_project, security
+
+    fake = FakeGitLab(protected_project("acme/platform/web"), graphql=(200, security()))
+
+    result = collect(job(host="gitlab", repositories=["acme/platform/web"]), read_secret=secret, get=fake)
+
+    assert result["host"] == "gitlab"
+    assert result["repositories"][0]["repository"] == "acme/platform/web"
+
+
+def test_github_does_not_take_a_server_address():
+    with pytest.raises(CollectorError) as error:
+        collect(job(baseUrl="https://ghe.acme.pt"), read_secret=secret, get=FakeGitHub())
+    assert error.value.code == "unsupported_host"
+
+
+def test_self_managed_server_on_a_private_address_is_refused():
+    with pytest.raises(CollectorError) as error:
+        collect(job(host="gitlab", baseUrl="https://localhost"), read_secret=secret)
+    assert error.value.code == "invalid_scope"
+
+
+@pytest.mark.parametrize("base_url", ["", 42])
+def test_invalid_base_url_is_refused(base_url):
+    with pytest.raises(CollectorError) as error:
+        collect(job(host="gitlab", baseUrl=base_url), read_secret=secret, get=FakeGitHub())
+    assert error.value.code == "invalid_scope"
+
+
+def test_github_app_connection_gets_an_installation_token():
+    tokens = []
+    collect(job(), read_secret=lambda _j: {"auth": "app", "installationId": "9"},
+            get=FakeGitHub(protected_repo()), app_token=lambda i: tokens.append(i) or "ghs_x")
+    assert tokens == ["9"]
