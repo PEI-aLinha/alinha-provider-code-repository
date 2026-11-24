@@ -8,21 +8,29 @@ import { QUERY_KEY, type AppInstallInput, type AppInstallStart, type Connection 
 /** Sends the person to GitHub to install the aLinha App; GitHub brings them back here through the shell's /resume. */
 export function InstallAppButton() {
   const { pathname } = useLocation()
+  const [problem, setProblem] = useState<string | null>(null)
   const start = useApiMutation<void, AppInstallStart>({
     path: '/code-repository/github-app/installations',
     onSuccess: ({ installUrl }) => {
-      rememberReturnPath(pathname)
+      try {
+        rememberReturnPath(pathname.replace(/\/+$/, ''))
+      } catch {
+        setProblem('Não foi possível preparar o regresso a esta página. Abra-a a partir do menu e tente de novo.')
+        return
+      }
       leaveFor(installUrl)
     },
   })
   return (
     <div className="flex flex-col gap-2">
       <div>
-        <Button onClick={() => start.mutate()} disabled={start.isPending || start.isSuccess}>
-          {start.isPending || start.isSuccess ? 'A abrir o GitHub…' : 'Instalar a aplicação do GitHub'}
+        <Button onClick={() => start.mutate()} disabled={start.isPending || (start.isSuccess && !problem)}>
+          {start.isPending || (start.isSuccess && !problem) ? 'A abrir o GitHub…' : 'Instalar a aplicação do GitHub'}
         </Button>
       </div>
-      {start.isError && <p role="alert" className="text-[0.875rem] font-semibold text-danger">{errorMessage(start.error)}</p>}
+      {(problem || start.isError) && (
+        <p role="alert" className="text-[0.875rem] font-semibold text-danger">{problem ?? errorMessage(start.error)}</p>
+      )}
     </div>
   )
 }

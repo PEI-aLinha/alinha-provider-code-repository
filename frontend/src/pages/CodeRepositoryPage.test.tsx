@@ -194,6 +194,18 @@ describe('CodeRepositoryPage', () => {
     expect(screen.getByRole('form', { name: 'Ligar repositório de código' })).toBeInTheDocument()
   })
 
+  it('goes to GitHub from an address with a trailing slash', async () => {
+    render(apiWith({
+      'GET /code-repository/setup': { githubApp: true, assignment: null },
+      'GET /code-repository/connection': undefined,
+      'POST /code-repository/github-app/installations': { installUrl: 'https://github.com/apps/alinha/installations/new?state=t' },
+    }), () => true, '/org/acme/integrations/code-repository/')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Instalar a aplicação do GitHub' }))
+
+    await waitFor(() => expect(leaveFor).toHaveBeenCalledWith('https://github.com/apps/alinha/installations/new?state=t'))
+  })
+
   it('finishes the GitHub App connection when GitHub sends the person back', async () => {
     const api = apiWith({
       'GET /code-repository/connection': { ...CONNECTION, auth: 'app', status: 'PENDING' },
