@@ -53,6 +53,23 @@ class CollectionResultParserTest {
         assertThat(parsed.outcomes.single().repository).isEqualTo("ACME/web")
     }
 
+    @Test
+    fun `a GitLab result may list projects in subgroups of the connected group`() {
+        val parsed = CollectionResultParser.parse(
+            result(listOf(repo("acme/platform/web")), account = "acme", host = "gitlab"), emptyList(),
+        )
+
+        assertThat(parsed.host).isEqualTo(Host.GITLAB)
+        assertThat(parsed.outcomes.single().repository).isEqualTo("acme/platform/web")
+    }
+
+    @Test
+    fun `a GitLab project of another group is refused`() {
+        assertThatThrownBy {
+            CollectionResultParser.parse(result(listOf(repo("acme-other/web")), account = "acme", host = "gitlab"), emptyList())
+        }.isInstanceOf(InvalidCollectionResult::class.java)
+    }
+
     @ParameterizedTest
     @MethodSource("invalidResults")
     fun `refuses anything outside the expected shape as a whole`(bad: Map<String, Any?>?) {
@@ -65,7 +82,7 @@ class CollectionResultParserTest {
         fun invalidResults(): List<Map<String, Any?>?> = listOf(
             null,
             result(schema = "other"),
-            result(host = "gitlab"),
+            result(host = "bitbucket"),
             result(account = "acme/../x"),
             result(truncated = "no"),
             result(repositories = List(21) { repo("acme/r$it") }),

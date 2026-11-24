@@ -5,9 +5,13 @@ import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import pt.alinha.coderepository.CodeRepositoryPlugin
+import pt.alinha.coderepository.internal.domain.AuthMethod
 import pt.alinha.coderepository.internal.domain.ConnectionStatus
+import pt.alinha.coderepository.internal.domain.Host
 import pt.alinha.coderepository.internal.domain.Names
 import pt.alinha.coderepository.internal.domain.Outcome
+import pt.alinha.coderepository.internal.persistence.CollectionScheduleEntity
+import pt.alinha.coderepository.internal.persistence.CollectionScheduleRepository
 import pt.alinha.coderepository.internal.persistence.ConnectionEntity
 import pt.alinha.coderepository.internal.persistence.ConnectionRepository
 import pt.alinha.coderepository.internal.persistence.EvidenceEntity
@@ -23,14 +27,16 @@ import pt.alinha.pluginapi.EvidenceOutcome
 import pt.alinha.pluginapi.EvidenceStrength
 import tools.jackson.databind.json.JsonMapper
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
-/** Connects the tenant's repository host, starts collections and stores what they find. */
+/** Connects the tenant's repository host, starts collections (on request and daily) and stores what they find. */
 @Service
 class ConnectionService(
     private val connections: ConnectionRepository,
     private val evidence: EvidenceRepository,
+    private val schedules: CollectionScheduleRepository,
     /** Only present when OpenBao is configured (spring.cloud.vault.enabled); without it, connecting answers 503. */
     private val secretStore: ObjectProvider<TenantSecretStore>,
     private val jobs: JobDispatcher,
@@ -51,36 +57,33 @@ class ConnectionService(
         return evidence.findByJobIdOrderByRepositoryAscCheckNameAsc(jobId).map { it.toView() }
     }
 
-    /** Creates or changes the connection and starts a collection. The token goes to OpenBao, never to the database. */
+    /**
+     * Creates or changes a token connection and starts a collection. The token goes to OpenBao, never to the
+     * database. A new token is needed for the first connection, for another server and after an App connection.
+     */
     @Transactional
     fun connect(input: ConnectInput): ConnectionView {
         val valid = input.validate()
-        val now = Instant.now(clock)
+        val target = ConnectionEntity.Target(valid.host, valid.baseUrl, valid.account, valid.repositories, AuthMethod.TOKEN)
         val existing = connections.findFirstBy()
-        if (existing == null && valid.token == null) throw TokenRequired()
-        if (existing?.isCollecting(now, COLLECTION_DEADLINE) == true) throw CollectionRunning()
-        if (valid.token != null) secrets() // fail before writing anything when OpenBao is not configured
+        val keepsToken = existing != null && existing.auth == AuthMethod.TOKEN && existing.sameServer(target)
+        if (valid.token == null && !keepsToken) throw TokenRequired()
+        val secret = valid.token?.let { mapOf("token" to it) }
+        return save(existing, target, secret, mapOf("host" to valid.host.id, "selfManaged" to (valid.baseUrl != null),
+            "tokenChanged" to (valid.token != null)))
+    }
 
-        // save() may merge (assigned id) and return another instance: keep working on the managed one.
-        val connection = existing?.apply { reconfigure(valid.host, valid.account, valid.repositories, now) }
-            ?: connections.save(ConnectionEntity(UUID.randomUUID(), valid.host, valid.account, valid.repositories, now))
-        audit.record(
-            if (existing == null) "code-repository.connected" else "code-repository.reconfigured",
-            ENTITY_TYPE,
-            connection.id.toString(),
-            mapOf(
-                "host" to valid.host.id,
-                "account" to valid.account,
-                "repositories" to valid.repositories.size,
-                "tokenChanged" to (valid.token != null),
-            ),
-        )
-        startCollection(connection, now)
-        // A concurrent connect fails here (unique tenant row, @Version), before it can overwrite the stored token.
-        connections.flush()
-        // Last: if OpenBao refuses, the exception rolls the connection, the audit and the job back.
-        valid.token?.let { secrets().put(CodeRepositoryPlugin.ID, mapOf("token" to it)) }
-        return connection.toView()
+    /**
+     * Connects through the aLinha GitHub App, once [GitHubAppService] checked that the person who installed it can see
+     * [installationId]. The account is the one GitHub reports for the installation; the repositories are the ones the
+     * client chose on GitHub.
+     */
+    @Transactional
+    fun connectApp(installationId: Long, account: String): ConnectionView {
+        if (!Names.isAccount(Host.GITHUB, account)) throw InstallationNotVerified()
+        val target = ConnectionEntity.Target(Host.GITHUB, null, account, emptyList(), AuthMethod.APP, installationId)
+        val secret = mapOf("auth" to AuthMethod.APP.id, "installationId" to installationId.toString())
+        return save(connections.findFirstBy(), target, secret, mapOf("host" to Host.GITHUB.id, "auth" to AuthMethod.APP.id))
     }
 
     @Transactional
@@ -89,17 +92,65 @@ class ConnectionService(
         val now = Instant.now(clock)
         if (connection.isCollecting(now, COLLECTION_DEADLINE)) throw CollectionRunning()
         audit.record("code-repository.collection-requested", ENTITY_TYPE, connection.id.toString())
-        startCollection(connection, now)
+        startCollection(connection, now, scheduled = false)
         return connection.toView()
     }
 
-    /** Removes the connection and the stored token. Evidence already collected stays. */
+    /**
+     * The daily collection, run by [CollectionScheduler] inside `runAs`. Skips a tenant whose collection is still
+     * running, and forgets the schedule of one that is no longer connected.
+     */
+    @Transactional
+    fun scheduledCollection() {
+        val connection = connections.findFirstBy()
+        if (connection == null) {
+            schedules.findById(tenants.current().value).ifPresent(schedules::delete)
+            return
+        }
+        val now = Instant.now(clock)
+        if (connection.isCollecting(now, COLLECTION_DEADLINE)) return
+        audit.record("code-repository.collection-scheduled", ENTITY_TYPE, connection.id.toString())
+        startCollection(connection, now, scheduled = true)
+    }
+
+    /** Removes the connection, its schedule and the stored credential. Evidence already collected stays. */
     @Transactional
     fun disconnect() {
         val connection = connections.findFirstBy() ?: throw NotConnected()
         connections.delete(connection)
+        schedules.findById(tenants.current().value).ifPresent(schedules::delete)
         audit.record("code-repository.disconnected", ENTITY_TYPE, connection.id.toString())
         secrets().delete(CodeRepositoryPlugin.ID)
+    }
+
+    private fun save(
+        existing: ConnectionEntity?,
+        target: ConnectionEntity.Target,
+        secret: Map<String, String>?,
+        details: Map<String, Any>,
+    ): ConnectionView {
+        val now = Instant.now(clock)
+        if (existing?.isCollecting(now, COLLECTION_DEADLINE) == true) throw CollectionRunning()
+        if (secret != null) secrets() // fail before writing anything when OpenBao is not configured
+
+        // save() may merge (assigned id) and return another instance: keep working on the managed one.
+        val connection = existing?.apply { reconfigure(target, now) }
+            ?: connections.save(ConnectionEntity(UUID.randomUUID(), target, now))
+        audit.record(
+            if (existing == null) "code-repository.connected" else "code-repository.reconfigured",
+            ENTITY_TYPE,
+            connection.id.toString(),
+            details + mapOf("account" to target.account, "repositories" to target.repositories.size),
+        )
+        // Inside a request: only ever the current tenant's row (CollectionScheduleEntity).
+        val tenantId = tenants.current().value
+        if (!schedules.existsById(tenantId)) schedules.save(CollectionScheduleEntity(tenantId, now.plus(SCHEDULE_INTERVAL)))
+        startCollection(connection, now, scheduled = false)
+        // A concurrent connect fails here (unique tenant row, @Version), before it can overwrite the stored credential.
+        connections.flush()
+        // Last: if OpenBao refuses, the exception rolls the connection, the audit and the job back.
+        secret?.let { secrets().put(CodeRepositoryPlugin.ID, it) }
+        return connection.toView()
     }
 
     /**
@@ -119,6 +170,15 @@ class ConnectionService(
             return
         }
         val now = Instant.now(clock)
+        // Continuously verified: the daily schedule collected it, and the previous collection succeeded within a day.
+        val previous = connection.lastCollectedAt
+        val strength = if (connection.collectingScheduled && previous != null &&
+            !previous.plus(CONTINUOUS_WINDOW).isBefore(now)
+        ) {
+            EvidenceStrength.CONTINUOUSLY_VERIFIED
+        } else {
+            EvidenceStrength.TECHNICALLY_VERIFIED
+        }
         val stored = parsed.outcomes.map { outcome ->
             evidence.save(
                 EvidenceEntity(
@@ -130,7 +190,7 @@ class ConnectionService(
                     outcome = outcome.outcome,
                     details = json.writeValueAsString(outcome.details),
                     controlIds = ControlMapping.controlsFor(outcome.check),
-                    strength = STRENGTH,
+                    strength = strength,
                     mappingVersion = ControlMapping.VERSION,
                     collectedAt = now,
                 ),
@@ -148,6 +208,7 @@ class ConnectionService(
                 "fail" to stored.count { it.outcome == Outcome.FAIL },
                 "unknown" to stored.count { it.outcome == Outcome.UNKNOWN },
                 "mappingVersion" to ControlMapping.VERSION,
+                "strength" to strength.name,
             ),
         )
         // UNKNOWN is not evidence of anything: the token could not see it.
@@ -190,27 +251,31 @@ class ConnectionService(
         )
     }
 
-    private fun startCollection(connection: ConnectionEntity, now: Instant) {
+    private fun startCollection(connection: ConnectionEntity, now: Instant, scheduled: Boolean) {
+        val scope = buildMap {
+            put("host", connection.host.id)
+            connection.baseUrl?.let { put("baseUrl", it) }
+            put("account", connection.account)
+            put("repositories", connection.repositories)
+        }
         val jobId = jobs.dispatch(
             JobRequest(
                 type = JOB_TYPE,
                 payload = mapOf(
                     "provider" to CodeRepositoryPlugin.ID,
                     "connectionRef" to CONNECTION_REF,
-                    "scope" to mapOf(
-                        "host" to connection.host.id,
-                        "account" to connection.account,
-                        "repositories" to connection.repositories,
-                    ),
+                    "scope" to scope,
                 ),
                 requestedBy = CodeRepositoryPlugin.ID,
             ),
         )
-        connection.collecting(jobId, now)
+        connection.collecting(jobId, now, scheduled)
     }
 
     private fun ConnectionEntity.toView() = ConnectionView(
         host = host.id,
+        baseUrl = baseUrl,
+        auth = auth.id,
         account = account,
         repositories = repositories,
         status = status,
@@ -240,12 +305,17 @@ class ConnectionService(
         const val CONNECTION_REF = "providers/code-repository"
         const val INVALID_RESULT = "invalid_result"
         const val GENERIC_ERROR = "collector_error"
-        val STRENGTH = EvidenceStrength.TECHNICALLY_VERIFIED
+
+        /** How often the schedule collects each connection. */
+        val SCHEDULE_INTERVAL: Duration = Duration.ofHours(24)
+
+        /** A scheduled collection whose previous success is at most this old is CONTINUOUSLY_VERIFIED. */
+        val CONTINUOUS_WINDOW: Duration = Duration.ofHours(26)
 
         /**
          * A collection still PENDING after this is treated as lost (a result that never came back, alinha#86), so a
          * new one may start. Well above the worker's deadline (WORKER_COLLECTOR_TIMEOUT_S × retries + backoff).
          */
-        val COLLECTION_DEADLINE: java.time.Duration = java.time.Duration.ofMinutes(15)
+        val COLLECTION_DEADLINE: Duration = Duration.ofMinutes(15)
     }
 }

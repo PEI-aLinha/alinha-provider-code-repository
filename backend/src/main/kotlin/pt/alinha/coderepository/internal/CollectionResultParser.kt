@@ -32,24 +32,24 @@ object CollectionResultParser {
         if (result == null) fail("no result")
         if (result["schema"] != SCHEMA) fail("unknown result schema")
         val host = (result["host"] as? String)?.let(Host::of) ?: fail("unknown host")
-        val account = (result["account"] as? String)?.takeIf { Names.ACCOUNT.matches(it) } ?: fail("invalid account")
+        val account = (result["account"] as? String)?.takeIf { Names.isAccount(host, it) } ?: fail("invalid account")
         val truncated = result["truncated"] as? Boolean ?: fail("truncated is not a boolean")
         val repositories = result["repositories"] as? List<*> ?: fail("repositories is not a list")
         if (repositories.size > Names.MAX_REPOSITORIES) fail("too many repositories")
 
-        val outcomes = repositories.flatMap { repository(it, account, expectedRepositories) }
+        val outcomes = repositories.flatMap { repository(it, host, account, expectedRepositories) }
         if (outcomes.distinctBy { it.repository.lowercase() to it.check }.size != outcomes.size) {
             fail("a repository or check is repeated")
         }
         return CollectionResult(host, account, outcomes, truncated)
     }
 
-    private fun repository(value: Any?, account: String, expected: List<String>): List<CheckOutcome> {
+    private fun repository(value: Any?, host: Host, account: String, expected: List<String>): List<CheckOutcome> {
         val entry = value as? Map<*, *> ?: fail("repository entry is not an object")
-        val name = (entry["repository"] as? String)?.takeIf { Names.REPOSITORY.matches(it) } ?: fail("invalid repository")
+        val name = (entry["repository"] as? String)?.takeIf { Names.isRepository(host, it) } ?: fail("invalid repository")
         // A repository the job did not ask for (or, with no list, outside the connected account) is not this tenant's.
         val allowed = if (expected.isEmpty()) {
-            name.substringBefore('/').equals(account, ignoreCase = true)
+            Names.isRepositoryOf(host, name, account)
         } else {
             expected.any { it.equals(name, ignoreCase = true) }
         }
