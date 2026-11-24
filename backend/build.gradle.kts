@@ -12,6 +12,8 @@ dependencies {
 
     implementation(project(":plugin-api"))
     implementation(project(":core"))
+    // Email invite to the person asked to connect the repository: only pt.alinha.notifications.api.EmailService
+    implementation(project(":notifications"))
 
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.data.jpa)

@@ -17,12 +17,12 @@ class CodeRepositoryPlugin : AlinhaPlugin {
         version = "0.1.0",
         publishes = setOf("EvidenceCollected"),
         consumes = setOf("JobCompleted", "JobFailed"),
-        permissions = setOf(READ, CONNECT),
+        permissions = setOf(READ, CONNECT, ASSIGN),
         rolePermissions = mapOf(
-            // US37: the responsible person, or the analyst they hand it to, connects the repository.
-            "responsible" to setOf(READ, CONNECT),
+            // US37: the responsible person connects the repository, or asks the analyst to (email invite).
+            "responsible" to setOf(READ, CONNECT, ASSIGN),
             "analyst" to setOf(READ, CONNECT),
-            "consultant" to setOf(READ, CONNECT),
+            "consultant" to setOf(READ, CONNECT, ASSIGN),
         ),
         nav = listOf(
             NavEntry("Repositório de código", "integrations/code-repository", NavArea.CLIENT, resource = RESOURCE, order = 70),
@@ -34,5 +34,6 @@ class CodeRepositoryPlugin : AlinhaPlugin {
         const val RESOURCE = "code-repository"
         const val READ = "code-repository:read"
         const val CONNECT = "code-repository:connect"
+        const val ASSIGN = "code-repository:assign"
     }
 }

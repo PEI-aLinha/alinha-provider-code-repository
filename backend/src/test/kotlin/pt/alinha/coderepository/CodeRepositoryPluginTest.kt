@@ -14,10 +14,15 @@ class CodeRepositoryPluginTest {
     @Test
     fun `the responsible person, the analyst and the consultant can connect (US37)`() {
         listOf("responsible", "analyst", "consultant").forEach { role ->
-            assertThat(manifest.rolePermissions[role]).containsExactlyInAnyOrder(
-                CodeRepositoryPlugin.READ, CodeRepositoryPlugin.CONNECT,
-            )
+            assertThat(manifest.rolePermissions[role]).contains(CodeRepositoryPlugin.READ, CodeRepositoryPlugin.CONNECT)
         }
         assertThat(manifest.rolePermissions).doesNotContainKey("registrant")
+    }
+
+    @Test
+    fun `only the responsible person and the consultant ask someone else to connect`() {
+        assertThat(manifest.rolePermissions.filterValues { CodeRepositoryPlugin.ASSIGN in it }.keys)
+            .containsExactlyInAnyOrder("responsible", "consultant")
+        assertThat(manifest.permissions).contains(CodeRepositoryPlugin.ASSIGN)
     }
 }

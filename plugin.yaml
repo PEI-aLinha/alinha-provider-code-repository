@@ -10,6 +10,7 @@ consumes: [JobCompleted, JobFailed]   # results of the evidence.collect jobs thi
 permissions:      # RBAC resources; role mapping lives in CodeRepositoryPlugin.kt
   - code-repository:read      # responsible, analyst, consultant: connection state and evidence
   - code-repository:connect   # responsible, analyst, consultant: connect, disconnect, collect now
+  - code-repository:assign    # responsible, consultant: ask someone by email to connect the repository
 nav:              # menu entries; GET /api/plugins shows each one only to roles with its permission
   - label: "Repositório de código"
     path: integrations/code-repository

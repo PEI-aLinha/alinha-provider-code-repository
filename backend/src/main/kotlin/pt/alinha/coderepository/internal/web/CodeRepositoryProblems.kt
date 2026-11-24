@@ -7,7 +7,11 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import pt.alinha.coderepository.internal.CollectionRunning
+import pt.alinha.coderepository.internal.GitHubAppUnavailable
+import pt.alinha.coderepository.internal.GitHubUnavailable
+import pt.alinha.coderepository.internal.InstallationNotVerified
 import pt.alinha.coderepository.internal.InvalidInput
+import pt.alinha.coderepository.internal.InvalidInstallState
 import pt.alinha.coderepository.internal.NotConnected
 import pt.alinha.coderepository.internal.SecretsUnavailable
 import pt.alinha.coderepository.internal.TokenRequired
@@ -17,6 +21,8 @@ private val FIELD_MESSAGES = mapOf(
     "account" to "Indique o nome da organização ou do utilizador, tal como aparece no endereço.",
     "repositories" to "Indique até 20 repositórios no formato organização/repositório, todos da mesma organização.",
     "token" to "O token não é válido. Copie-o de novo, sem espaços.",
+    "baseUrl" to "Indique o endereço do servidor GitLab, por exemplo https://gitlab.empresa.pt.",
+    "email" to "Indique um endereço de email válido.",
 )
 
 /** RFC 9457 Problem Details with `code` and `errors` (ADR 0003). `detail` is shown to the user, in Portuguese. */
@@ -46,6 +52,29 @@ class CodeRepositoryProblems {
     fun noSecrets(e: SecretsUnavailable) = problem(
         HttpStatus.SERVICE_UNAVAILABLE, "SECRETS_UNAVAILABLE",
         "Não é possível guardar o token neste momento. Tente novamente mais tarde.",
+    )
+
+    @ExceptionHandler
+    fun installState(e: InvalidInstallState) = problem(
+        HttpStatus.UNPROCESSABLE_CONTENT, "APP_INSTALL_EXPIRED",
+        "A instalação da aplicação expirou ou não foi iniciada nesta página. Comece de novo.",
+    )
+
+    @ExceptionHandler
+    fun notVerified(e: InstallationNotVerified) = problem(
+        HttpStatus.UNPROCESSABLE_CONTENT, "APP_INSTALL_NOT_VERIFIED",
+        "Não foi possível confirmar que a aplicação foi instalada na sua conta do GitHub. Instale-a de novo a partir desta página.",
+    )
+
+    @ExceptionHandler
+    fun appUnavailable(e: GitHubAppUnavailable) = problem(
+        HttpStatus.SERVICE_UNAVAILABLE, "APP_UNAVAILABLE",
+        "A ligação pela aplicação do GitHub não está disponível. Use um token de acesso.",
+    )
+
+    @ExceptionHandler
+    fun githubUnavailable(e: GitHubUnavailable) = problem(
+        HttpStatus.SERVICE_UNAVAILABLE, "GITHUB_UNAVAILABLE", "O GitHub não respondeu. Tente novamente dentro de alguns minutos.",
     )
 
     @ExceptionHandler

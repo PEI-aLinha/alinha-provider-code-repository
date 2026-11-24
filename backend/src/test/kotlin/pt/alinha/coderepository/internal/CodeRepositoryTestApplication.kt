@@ -15,6 +15,9 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.testcontainers.postgresql.PostgreSQLContainer
 import pt.alinha.coderepository.CodeRepositoryPlugin
+import pt.alinha.coderepository.internal.github.GitHubAppService
+import pt.alinha.coderepository.internal.github.GitHubAppSettings
+import pt.alinha.coderepository.internal.github.GitHubInstallationVerifier
 import pt.alinha.coderepository.internal.persistence.ConnectionRepository
 import pt.alinha.coderepository.internal.web.CodeRepositoryController
 import pt.alinha.coderepository.internal.web.CodeRepositoryProblems
@@ -36,6 +39,7 @@ import pt.alinha.core.tenant.internal.JwtTenantContext
 import pt.alinha.core.tenant.internal.ScopedCorrelationContext
 import pt.alinha.core.tenant.internal.TenantResolutionInterceptor
 import pt.alinha.core.tenant.internal.TenantWebConfig
+import pt.alinha.notifications.api.EmailService
 import pt.alinha.pluginapi.TenantId
 import pt.alinha.pluginapi.TenantSecretStore
 import java.util.UUID
@@ -77,6 +81,30 @@ class FakeJobResults(private val tenants: TenantContext) : JobResults {
     override fun find(jobId: UUID): JobResult? = results[tenants.current() to jobId]
 }
 
+/** Records emails instead of queueing them; like the real one, needs a transaction and refuses a bad address. */
+class FakeEmailService(private val tenants: TenantContext) : EmailService {
+    data class Sent(val tenant: TenantId, val to: String, val template: String, val params: Map<String, String>)
+
+    val sent: MutableList<Sent> = java.util.Collections.synchronizedList(mutableListOf())
+
+    override fun send(to: String, template: String, params: Map<String, String>) {
+        check(TransactionSynchronizationManager.isActualTransactionActive()) { "send needs a transaction" }
+        require('@' in to) { "Invalid email address" }
+        sent += Sent(tenants.current(), to, template, params)
+    }
+}
+
+/** GitHub stand-in: [installations] maps (installation id, code) to the account the user can see it on. */
+class FakeInstallationVerifier : GitHubInstallationVerifier {
+    val installations = ConcurrentHashMap<Pair<Long, String>, String>()
+    @Volatile var down = false
+
+    override fun accountOf(installationId: Long, code: String): String {
+        if (down) throw GitHubUnavailable()
+        return installations[installationId to code] ?: throw InstallationNotVerified()
+    }
+}
+
 /**
  * The plugin with the core's real RBAC, tenant resolution and audit trail on PostgreSQL. OpenBao, the outbox and
  * the job results are fakes. Token value: `<role>.<sub>.<tenant>`; a consultant's tenant goes in `tenants`.
@@ -91,7 +119,8 @@ class FakeJobResults(private val tenants: TenantContext) : JobResults {
     TenantWebConfig::class, TenantResolutionInterceptor::class, JwtTenantContext::class,
     HibernateTenantResolver::class, CorrelationIdFilter::class, ScopedCorrelationContext::class,
     AuditActor::class, JpaAuditTrail::class,
-    CodeRepositoryPlugin::class, ConnectionService::class, CollectionResultListener::class,
+    CodeRepositoryPlugin::class, ConnectionService::class, CollectionResultListener::class, CollectionScheduler::class,
+    AssignmentService::class, GitHubAppService::class,
     CodeRepositoryApiImpl::class, CodeRepositoryController::class, CodeRepositoryProblems::class,
 )
 class CodeRepositoryTestApplication {
@@ -104,6 +133,12 @@ class CodeRepositoryTestApplication {
     @Bean fun jobDispatcher(tenants: TenantContext) = FakeJobDispatcher(tenants)
 
     @Bean fun jobResults(tenants: TenantContext) = FakeJobResults(tenants)
+
+    @Bean fun emailService(tenants: TenantContext) = FakeEmailService(tenants)
+
+    @Bean fun installationVerifier() = FakeInstallationVerifier()
+
+    @Bean fun gitHubAppSettings() = GitHubAppSettings("alinha-test", "Iv1.client", "client-secret")
 
     @Bean
     @Primary
@@ -132,5 +167,8 @@ object CodeRepositoryDatabase {
         registry.add("spring.flyway.locations") { "classpath:db/migration" }
         registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri") { "https://keycloak.test/realms/alinha" }
         registry.add("spring.security.oauth2.resourceserver.jwt.audiences") { "alinha-api" }
+        // The tests call CollectionScheduler.runDue() themselves.
+        registry.add("alinha.code-repository.schedule.poll-interval-ms") { "86400000" }
+        registry.add("ALINHA_PUBLIC_URL") { "https://alinha.test" }
     }
 }
