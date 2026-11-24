@@ -2,6 +2,8 @@ package pt.alinha.coderepository
 
 import org.springframework.stereotype.Component
 import pt.alinha.pluginapi.AlinhaPlugin
+import pt.alinha.pluginapi.NavArea
+import pt.alinha.pluginapi.NavEntry
 import pt.alinha.pluginapi.PluginKind
 import pt.alinha.pluginapi.PluginManifest
 
@@ -9,12 +11,28 @@ import pt.alinha.pluginapi.PluginManifest
 @Component
 class CodeRepositoryPlugin : AlinhaPlugin {
     override val manifest = PluginManifest(
-        id = "code-repository",
+        id = ID,
         name = "Code Repository",
         kind = PluginKind.PROVIDER,
         version = "0.1.0",
-        publishes = setOf(),
-        consumes = setOf(),
-        permissions = setOf(),
+        publishes = setOf("EvidenceCollected"),
+        consumes = setOf("JobCompleted", "JobFailed"),
+        permissions = setOf(READ, CONNECT),
+        rolePermissions = mapOf(
+            // US37: the responsible person, or the analyst they hand it to, connects the repository.
+            "responsible" to setOf(READ, CONNECT),
+            "analyst" to setOf(READ, CONNECT),
+            "consultant" to setOf(READ, CONNECT),
+        ),
+        nav = listOf(
+            NavEntry("Repositório de código", "integrations/code-repository", NavArea.CLIENT, resource = RESOURCE, order = 70),
+        ),
     )
+
+    companion object {
+        const val ID = "code-repository"
+        const val RESOURCE = "code-repository"
+        const val READ = "code-repository:read"
+        const val CONNECT = "code-repository:connect"
+    }
 }

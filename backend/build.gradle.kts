@@ -18,4 +18,12 @@ dependencies {
     implementation(libs.spring.modulith.starter.core)
 
     testImplementation(libs.spring.boot.starter.test)
+    // Integration test: real core RBAC, tenant and audit beans on PostgreSQL (CodeRepositoryIntegrationTest)
+    testImplementation(libs.spring.boot.starter.webmvc.test)
+    testImplementation(libs.spring.boot.starter.security.oauth2.resource.server)
+    testImplementation(libs.spring.boot.starter.flyway)
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.testcontainers.postgresql)
+    testRuntimeOnly(libs.flyway.postgresql)
+    testRuntimeOnly(libs.postgresql)
 }

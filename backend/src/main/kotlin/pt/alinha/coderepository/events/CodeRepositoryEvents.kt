@@ -1,10 +1,4 @@
 package pt.alinha.coderepository.events
 
-// Events published by this plugin (listed in plugin.yaml > publishes).
-// Example:
-//
-// data class SomethingHappened(
-//     override val tenantId: TenantId,
-//     val somethingId: UUID,
-//     override val occurredAt: Instant = Instant.now(),
-// ) : DomainEvent
+// This plugin publishes `pt.alinha.pluginapi.EvidenceCollected` (plugin-api), shared by every evidence
+// provider, so consumers depend on plugin-api only. It defines no events of its own.
