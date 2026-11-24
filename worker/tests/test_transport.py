@@ -56,7 +56,8 @@ def test_refuses_anything_else(url):
 
 
 @pytest.mark.parametrize("addresses", [("10.1.2.3",), ("127.0.0.1",), ("169.254.169.254",), ("192.168.1.1",),
-                                       ("8.8.8.8", "10.0.0.1"), ("::1",), ("fd00::1",), ()])
+                                       ("8.8.8.8", "10.0.0.1"), ("::1",), ("fd00::1",), ("::ffff:10.0.0.1",),
+                                       ("64:ff9b::a00:1",), ("64:ff9b:1::1",), ()])
 def test_refuses_hosts_that_resolve_to_a_private_address(addresses):
     with pytest.raises(CollectorError) as error:
         public_address("git.acme.pt", 443, resolving(*addresses))

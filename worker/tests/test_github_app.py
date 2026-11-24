@@ -56,7 +56,8 @@ def test_unconfigured_app_is_a_final_error(platform):
 
 
 @pytest.mark.parametrize("status,code", [(404, "installation_not_found"), (403, "installation_not_found"),
-                                         (401, "provider_not_configured"), (201, "installation_not_found")])
+                                         (401, "provider_not_configured"), (422, "provider_not_configured"),
+                                         (201, "installation_not_found")])
 def test_refusals_are_final(status, code):
     with pytest.raises(CollectorError) as error:
         installation_token("777", PLATFORM, answering(status, {}), sign)

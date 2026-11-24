@@ -97,9 +97,23 @@ def public_address(host: str, port: int, resolve: Callable[..., Any] = socket.ge
     except OSError as error:
         raise TransientError("provider host does not resolve") from error
     addresses = [info[4][0] for info in infos]
-    if not addresses or not all(ipaddress.ip_address(a.split("%", 1)[0]).is_global for a in addresses):
+    if not addresses or not all(_is_public(a) for a in addresses):
         raise CollectorError("host_not_allowed", "the server address is not a public internet address")
     return addresses[0]
+
+
+# NAT64 prefixes count as global to `ipaddress`, but a NAT64 gateway would turn them into any IPv4 address.
+_TRANSLATED = (ipaddress.ip_network("64:ff9b::/96"), ipaddress.ip_network("64:ff9b:1::/48"))
+
+
+def _is_public(address: str) -> bool:
+    ip = ipaddress.ip_address(address.split("%", 1)[0])
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif any(ip in net for net in _TRANSLATED):
+            return False
+    return ip.is_global
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):

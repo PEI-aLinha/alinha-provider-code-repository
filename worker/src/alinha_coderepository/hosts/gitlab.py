@@ -7,6 +7,7 @@ are read-only.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 from typing import Any, Mapping
@@ -96,17 +97,19 @@ class GitLab:
     # -- checks ---------------------------------------------------------------------------------------------------
 
     def _protection(self, path: str, branch: str) -> CheckResult:
-        answer = self._call(f"{path}/protected_branches/{quote(branch, safe='')}")
-        if answer.status == 404:
-            return CheckResult(Check.BRANCH_PROTECTION, Outcome.FAIL, {"protected": False})
-        body = answer.json() if answer.status == 200 else None
-        if not isinstance(body, dict):
+        # The list, not /protected_branches/<name>: a rule may be a wildcard (`main*`, `*`) that covers the branch.
+        answer = self._call(f"{path}/protected_branches?per_page={_PAGE}")
+        rules = answer.json() if answer.status == 200 else None
+        if not isinstance(rules, list):
             return CheckResult(Check.BRANCH_PROTECTION, Outcome.UNKNOWN, {"reason": "no_permission"})
-        levels = [_int(level.get("access_level")) for level in body.get("push_access_levels") or []
+        matching = [r for r in rules if isinstance(r, dict) and _covers(r.get("name"), branch)]
+        if not matching:
+            return CheckResult(Check.BRANCH_PROTECTION, Outcome.FAIL, {"protected": False})
+        levels = [_int(level.get("access_level")) for rule in matching for level in rule.get("push_access_levels") or []
                   if isinstance(level, dict)]
         # Protected, but developers may still push straight to it: not a protection that forces a review.
         developers_push = any(0 < level <= _DEVELOPER for level in levels)
-        force_push = body.get("allow_force_push") is True
+        force_push = any(rule.get("allow_force_push") is True for rule in matching)
         outcome = Outcome.FAIL if developers_push or force_push else Outcome.PASS
         return CheckResult(Check.BRANCH_PROTECTION, outcome,
                            {"protected": True, "developersCanPush": developers_push, "forcePush": force_push})
@@ -150,7 +153,14 @@ def _applies_to(rule: dict[str, Any], branch: str) -> bool:
     branches = rule.get("protected_branches")
     if not branches or rule.get("applies_to_all_protected_branches"):
         return True
-    return any(isinstance(b, dict) and b.get("name") == branch for b in branches)
+    return any(isinstance(b, dict) and _covers(b.get("name"), branch) for b in branches)
+
+
+def _covers(rule: Any, branch: str) -> bool:
+    """GitLab protected-branch names may hold `*` wildcards; nothing else is special."""
+    if not isinstance(rule, str) or not rule:
+        return False
+    return rule == branch or ("*" in rule and fnmatch.fnmatchcase(branch, rule.replace("[", "[[]").replace("?", "[?]")))
 
 
 def _scanner(check: Check, project: dict[str, Any] | None, scanner: str, counts_key: str,

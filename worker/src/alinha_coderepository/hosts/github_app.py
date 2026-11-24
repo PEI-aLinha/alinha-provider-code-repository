@@ -55,8 +55,8 @@ def installation_token(installation_id: str, platform: Mapping[str, str], post: 
     )
     if answer.status in (404, 403):
         raise CollectorError("installation_not_found", "the GitHub App is no longer installed on this account")
-    if answer.status == 401:
-        raise CollectorError("provider_not_configured", "GitHub refused the App credentials")
+    if answer.status in (401, 422):  # 422: the App registration lacks one of the requested read permissions
+        raise CollectorError("provider_not_configured", "GitHub refused the App credentials or permissions")
     if answer.status == 429 or answer.status >= 500:
         raise TransientError(f"GitHub answered {answer.status}")
     body = answer.json() if answer.status == 201 else None

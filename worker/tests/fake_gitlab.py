@@ -44,11 +44,11 @@ def protected_project(path: str = "acme/api", branch: str = "main", approvals: i
     base = f"/api/v4/projects/{encoded}"
     return {
         base: (200, {"path_with_namespace": path, "default_branch": branch}),
-        f"{base}/protected_branches/{branch}": (200, {
+        f"{base}/protected_branches?per_page=100": (200, [{
             "name": branch,
             "push_access_levels": [{"access_level": level} for level in push_levels],
             "allow_force_push": force_push,
-        }),
+        }]),
         f"{base}/approval_rules?per_page=100": (200, [
             {"rule_type": "regular", "approvals_required": approvals, "protected_branches": []},
         ]),

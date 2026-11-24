@@ -32,13 +32,37 @@ def test_protection_that_still_lets_developers_push_or_force_push_fails(levels, 
     assert outcomes(GitLab(TOKEN, fake).inspect("acme/api"))[Check.BRANCH_PROTECTION].outcome == Outcome.FAIL
 
 
+PROTECTED = "/api/v4/projects/acme%2Fapi/protected_branches?per_page=100"
+
+
 def test_unprotected_default_branch_fails_and_hidden_protection_is_unknown():
     routes = protected_project()
-    del routes["/api/v4/projects/acme%2Fapi/protected_branches/main"]
+    routes[PROTECTED] = (200, [{"name": "release", "push_access_levels": [{"access_level": 40}]}])
     assert outcomes(GitLab(TOKEN, FakeGitLab(routes)).inspect("acme/api"))[Check.BRANCH_PROTECTION].outcome == Outcome.FAIL
 
-    routes["/api/v4/projects/acme%2Fapi/protected_branches/main"] = (403, {"message": "403 Forbidden"})
+    routes[PROTECTED] = (403, {"message": "403 Forbidden"})
     assert outcomes(GitLab(TOKEN, FakeGitLab(routes)).inspect("acme/api"))[Check.BRANCH_PROTECTION].outcome == Outcome.UNKNOWN
+
+
+@pytest.mark.parametrize("rule", ["main*", "*", "ma?n"])
+def test_a_wildcard_rule_covers_the_default_branch(rule):
+    routes = protected_project()
+    routes[PROTECTED] = (200, [{"name": rule, "push_access_levels": [{"access_level": 40}], "allow_force_push": False}])
+
+    result = outcomes(GitLab(TOKEN, FakeGitLab(routes)).inspect("acme/api"))[Check.BRANCH_PROTECTION].outcome
+
+    assert result == (Outcome.FAIL if rule == "ma?n" else Outcome.PASS)  # `?` is not a GitLab wildcard
+
+
+def test_approval_rule_for_a_wildcard_branch_counts():
+    routes = protected_project()
+    routes["/api/v4/projects/acme%2Fapi/approval_rules?per_page=100"] = (200, [
+        {"rule_type": "regular", "approvals_required": 2, "protected_branches": [{"name": "ma*"}]},
+    ])
+
+    reviews = outcomes(GitLab(TOKEN, FakeGitLab(routes)).inspect("acme/api"))[Check.REQUIRED_REVIEWS]
+
+    assert reviews.details == {"requiredApprovals": 2}
 
 
 def test_approvals_count_only_rules_for_the_default_branch_and_not_security_approvers():
