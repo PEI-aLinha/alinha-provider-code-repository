@@ -10,6 +10,7 @@ import pt.alinha.coderepository.internal.domain.ConnectionStatus
 import pt.alinha.coderepository.internal.domain.Host
 import pt.alinha.coderepository.internal.domain.Names
 import pt.alinha.coderepository.internal.domain.Outcome
+import pt.alinha.coderepository.internal.persistence.AssignmentRepository
 import pt.alinha.coderepository.internal.persistence.CollectionScheduleEntity
 import pt.alinha.coderepository.internal.persistence.CollectionScheduleRepository
 import pt.alinha.coderepository.internal.persistence.ConnectionEntity
@@ -37,6 +38,7 @@ class ConnectionService(
     private val connections: ConnectionRepository,
     private val evidence: EvidenceRepository,
     private val schedules: CollectionScheduleRepository,
+    private val assignments: AssignmentRepository,
     /** Only present when OpenBao is configured (spring.cloud.vault.enabled); without it, connecting answers 503. */
     private val secretStore: ObjectProvider<TenantSecretStore>,
     private val jobs: JobDispatcher,
@@ -108,7 +110,11 @@ class ConnectionService(
             return
         }
         val now = Instant.now(clock)
-        if (connection.isCollecting(now, COLLECTION_DEADLINE)) return
+        if (connection.isCollecting(now, COLLECTION_DEADLINE)) {
+            // Someone started one by hand: try again soon instead of a day later (the 26-hour window).
+            schedules.findById(tenants.current().value).ifPresent { it.postpone(now.plus(SCHEDULE_RETRY)) }
+            return
+        }
         audit.record("code-repository.collection-scheduled", ENTITY_TYPE, connection.id.toString())
         startCollection(connection, now, scheduled = true)
     }
@@ -120,6 +126,7 @@ class ConnectionService(
         connections.delete(connection)
         schedules.findById(tenants.current().value).ifPresent(schedules::delete)
         audit.record("code-repository.disconnected", ENTITY_TYPE, connection.id.toString())
+        clearAssignment()
         secrets().delete(CodeRepositoryPlugin.ID)
     }
 
@@ -143,6 +150,7 @@ class ConnectionService(
             details + mapOf("account" to target.account, "repositories" to target.repositories.size),
         )
         // Inside a request: only ever the current tenant's row (CollectionScheduleEntity).
+        clearAssignment() // the request is done
         val tenantId = tenants.current().value
         if (!schedules.existsById(tenantId)) schedules.save(CollectionScheduleEntity(tenantId, now.plus(SCHEDULE_INTERVAL)))
         startCollection(connection, now, scheduled = false)
@@ -239,6 +247,12 @@ class ConnectionService(
     @Transactional(readOnly = true)
     fun evidence(evidenceId: UUID): EvidenceEntity? = evidence.findById(evidenceId).orElse(null)
 
+    private fun clearAssignment() {
+        val assignment = assignments.findFirstBy() ?: return
+        assignments.delete(assignment)
+        audit.record("code-repository.unassigned", "code_repository_assignment", assignment.id.toString())
+    }
+
     private fun secrets(): TenantSecretStore = secretStore.ifAvailable ?: throw SecretsUnavailable()
 
     private fun fail(connection: ConnectionEntity, jobId: UUID, code: String) {
@@ -308,6 +322,9 @@ class ConnectionService(
 
         /** How often the schedule collects each connection. */
         val SCHEDULE_INTERVAL: Duration = Duration.ofHours(24)
+
+        /** When the daily collection found one already running. */
+        val SCHEDULE_RETRY: Duration = Duration.ofMinutes(15)
 
         /** A scheduled collection whose previous success is at most this old is CONTINUOUSLY_VERIFIED. */
         val CONTINUOUS_WINDOW: Duration = Duration.ofHours(26)

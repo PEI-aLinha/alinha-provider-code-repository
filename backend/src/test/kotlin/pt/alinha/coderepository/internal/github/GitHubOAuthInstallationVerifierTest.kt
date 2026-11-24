@@ -32,6 +32,18 @@ class GitHubOAuthInstallationVerifierTest {
             .andExpect(content().formDataContains(mapOf("client_id" to "Iv1.client", "client_secret" to "s3cret", "code" to "abc")))
             .andRespond(withSuccess(body, MediaType.APPLICATION_JSON))
 
+    private val since = java.time.Instant.parse("2026-11-24T10:00:00Z")
+
+    /** An installation as GitHub lists it, changed at [updated]. */
+    private fun installation(id: Long, login: String, updated: String = "2026-11-24T10:05:00Z") =
+        """{"id": $id, "account": {"login": "$login"}, "created_at": "2025-01-01T00:00:00Z", "updated_at": "$updated"}"""
+
+    private fun revoked() = server.expect(requestTo("https://api.github.com/applications/Iv1.client/token"))
+        .andExpect(method(HttpMethod.DELETE))
+        .andExpect(header("Authorization", "Basic " + java.util.Base64.getEncoder().encodeToString("Iv1.client:s3cret".toByteArray())))
+        .andExpect(content().json("""{"access_token": "ghu_user"}"""))
+        .andRespond(withStatus(HttpStatus.NO_CONTENT))
+
     private fun installations(page: Int, body: String) =
         server.expect(requestTo("https://api.github.com/user/installations?per_page=100&page=$page"))
             .andExpect(header("Authorization", "Bearer ghu_user"))
@@ -40,34 +52,48 @@ class GitHubOAuthInstallationVerifierTest {
     @Test
     fun `returns the account of an installation the user can see`() {
         tokenAnswer()
-        installations(1, """{"installations": [{"id": 1, "account": {"login": "other"}}, {"id": 42, "account": {"login": "acme"}}]}""")
+        installations(1, """{"installations": [${installation(1, "other")}, ${installation(42, "acme")}]}""")
+        revoked()
 
-        assertThat(verifier.accountOf(42, "abc")).isEqualTo("acme")
+        assertThat(verifier.accountOf(42, "abc", since)).isEqualTo("acme")
         server.verify()
     }
 
     @Test
     fun `looks through further pages`() {
         tokenAnswer()
-        installations(1, """{"installations": [${(1..100).joinToString { """{"id": $it, "account": {"login": "o$it"}}""" }}]}""")
-        installations(2, """{"installations": [{"id": 4242, "account": {"login": "acme"}}]}""")
+        installations(1, """{"installations": [${(1L..100L).joinToString { installation(it, "o$it") }}]}""")
+        installations(2, """{"installations": [${installation(4242, "acme")}]}""")
+        revoked()
 
-        assertThat(verifier.accountOf(4242, "abc")).isEqualTo("acme")
+        assertThat(verifier.accountOf(4242, "abc", since)).isEqualTo("acme")
     }
 
     @Test
     fun `an installation the user cannot see is not verified`() {
         tokenAnswer()
-        installations(1, """{"installations": [{"id": 1, "account": {"login": "other"}}]}""")
+        installations(1, """{"installations": [${installation(1, "other")}]}""")
+        revoked()
 
-        assertThatThrownBy { verifier.accountOf(42, "abc") }.isInstanceOf(InstallationNotVerified::class.java)
+        assertThatThrownBy { verifier.accountOf(42, "abc", since) }.isInstanceOf(InstallationNotVerified::class.java)
+        server.verify()
+    }
+
+    @Test
+    fun `an installation the user can see but did not just install or change is not verified`() {
+        tokenAnswer()
+        // e.g. a member of someone else's organisation, coming back with that organisation's installation id
+        installations(1, """{"installations": [${installation(42, "victim", updated = "2026-11-20T00:00:00Z")}]}""")
+        revoked()
+
+        assertThatThrownBy { verifier.accountOf(42, "abc", since) }.isInstanceOf(InstallationNotVerified::class.java)
     }
 
     @Test
     fun `a used or forged code is not verified`() {
         tokenAnswer("""{"error": "bad_verification_code"}""")
 
-        assertThatThrownBy { verifier.accountOf(42, "abc") }.isInstanceOf(InstallationNotVerified::class.java)
+        assertThatThrownBy { verifier.accountOf(42, "abc", since) }.isInstanceOf(InstallationNotVerified::class.java)
     }
 
     @Test
@@ -75,19 +101,20 @@ class GitHubOAuthInstallationVerifierTest {
         tokenAnswer()
         server.expect(requestTo("https://api.github.com/user/installations?per_page=100&page=1"))
             .andRespond(withStatus(HttpStatus.UNAUTHORIZED))
+        revoked()
 
-        assertThatThrownBy { verifier.accountOf(42, "abc") }.isInstanceOf(InstallationNotVerified::class.java)
+        assertThatThrownBy { verifier.accountOf(42, "abc", since) }.isInstanceOf(InstallationNotVerified::class.java)
     }
 
     @Test
     fun `GitHub down or unreachable is unavailable, not a refusal`() {
         server.expect(ExpectedCount.once(), requestTo("https://github.com/login/oauth/access_token"))
             .andRespond(withStatus(HttpStatus.BAD_GATEWAY))
-        assertThatThrownBy { verifier.accountOf(42, "abc") }.isInstanceOf(GitHubUnavailable::class.java)
+        assertThatThrownBy { verifier.accountOf(42, "abc", since) }.isInstanceOf(GitHubUnavailable::class.java)
 
         server.reset()
         server.expect(requestTo("https://github.com/login/oauth/access_token")).andRespond(withException(IOException("reset")))
-        assertThatThrownBy { verifier.accountOf(42, "abc") }.isInstanceOf(GitHubUnavailable::class.java)
+        assertThatThrownBy { verifier.accountOf(42, "abc", since) }.isInstanceOf(GitHubUnavailable::class.java)
     }
 
     @Test

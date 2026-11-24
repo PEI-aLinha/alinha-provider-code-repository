@@ -7,6 +7,7 @@ import pt.alinha.coderepository.internal.AppInstallStart
 import pt.alinha.coderepository.internal.ConnectionService
 import pt.alinha.coderepository.internal.ConnectionView
 import pt.alinha.coderepository.internal.GitHubAppUnavailable
+import pt.alinha.coderepository.internal.InstallationNotVerified
 import pt.alinha.coderepository.internal.InvalidInstallState
 import pt.alinha.coderepository.internal.persistence.GitHubAppInstallEntity
 import pt.alinha.coderepository.internal.persistence.GitHubAppInstallRepository
@@ -57,23 +58,44 @@ class GitHubAppService(
         val installationId = input.installationId?.takeIf { it > 0 } ?: throw InvalidInstallState()
         val state = input.state?.takeIf { STATE.matches(it) } ?: throw InvalidInstallState()
         val code = input.code?.takeIf { CODE.matches(it) } ?: throw InvalidInstallState()
-        consume(state)
-        val account = verifier.accountOf(installationId, code)
-        return tx.execute { connections.connectApp(installationId, account) } ?: error("no connection")
+        val startedAt = check(state)
+        val account = try {
+            verifier.accountOf(installationId, code, startedAt)
+        } catch (e: InstallationNotVerified) {
+            tx.executeWithoutResult { installs.findFirstBy()?.let(::refuse) } // this attempt is over
+            throw e
+        }
+        // The state is used up only together with the connection: if this fails, nothing is half done.
+        return tx.execute {
+            val install = installs.findFirstBy()?.takeIf { matches(it, state) } ?: throw InvalidInstallState()
+            installs.delete(install)
+            connections.connectApp(installationId, account)
+        } ?: error("no connection")
     }
 
-    /** Uses the tenant's state once: a second return with it, or another tenant's, is refused. */
-    private fun consume(state: String) {
-        // Committed either way: a wrong state also ends the attempt, and the refusal stays in the audit trail.
-        val valid = tx.execute {
-            val install = installs.findFirstBy() ?: return@execute false
-            val matches = MessageDigest.isEqual(install.stateHash.toByteArray(), hash(state).toByteArray())
-            val fresh = install.expiresAt.isAfter(Instant.now(clock))
-            installs.delete(install)
-            if (!(matches && fresh)) audit.record("code-repository.app-install-refused", ENTITY_TYPE, install.id.toString())
-            matches && fresh
+    /**
+     * The tenant's state, unexpired: returns when the attempt started. A wrong or expired one ends the attempt (used
+     * once: a second return with it, or another tenant's, is refused), and the refusal stays in the audit trail.
+     */
+    private fun check(state: String): Instant {
+        val startedAt = tx.execute {
+            val install = installs.findFirstBy() ?: return@execute null
+            if (matches(install, state) && install.expiresAt.isAfter(Instant.now(clock))) {
+                install.expiresAt.minus(STATE_TTL)
+            } else {
+                refuse(install)
+                null
+            }
         }
-        if (valid != true) throw InvalidInstallState()
+        return startedAt ?: throw InvalidInstallState()
+    }
+
+    private fun matches(install: GitHubAppInstallEntity, state: String) =
+        MessageDigest.isEqual(install.stateHash.toByteArray(), hash(state).toByteArray())
+
+    private fun refuse(install: GitHubAppInstallEntity) {
+        installs.delete(install)
+        audit.record("code-repository.app-install-refused", ENTITY_TYPE, install.id.toString())
     }
 
     private fun hash(state: String): String =

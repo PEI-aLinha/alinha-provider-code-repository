@@ -110,7 +110,8 @@ data class AssignInput(val email: String?) {
 
     private companion object {
         const val MAX_EMAIL = 254
-        val EMAIL = Regex("^[^@\\s\\p{Cntrl}]{1,64}@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
+        // Local part: RFC 5322 atext and dots only (no quotes, commas or angle brackets that could add recipients).
+        val EMAIL = Regex("^[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
     }
 }
 
@@ -140,6 +141,9 @@ class InstallationNotVerified : RuntimeException("the installation is not the us
 
 /** The GitHub App is not configured on this platform. */
 class GitHubAppUnavailable : RuntimeException("the GitHub App is not configured")
+
+/** The organisation asked someone less than [retryAfter] ago. */
+class TooManyInvites(val retryAfter: java.time.Duration) : RuntimeException("an invite was sent moments ago")
 
 /** GitHub did not answer; trying again later may work. */
 class GitHubUnavailable(cause: Throwable? = null) : RuntimeException("GitHub did not answer", cause)

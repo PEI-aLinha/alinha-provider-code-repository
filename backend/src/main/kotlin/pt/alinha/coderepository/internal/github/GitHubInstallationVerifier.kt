@@ -1,6 +1,7 @@
 package pt.alinha.coderepository.internal.github
 
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatusCode
 import org.springframework.http.MediaType
 import org.springframework.http.client.SimpleClientHttpRequestFactory
@@ -11,16 +12,22 @@ import org.springframework.web.client.RestClientException
 import org.springframework.web.client.RestClientResponseException
 import pt.alinha.coderepository.internal.GitHubUnavailable
 import pt.alinha.coderepository.internal.InstallationNotVerified
+import java.time.Instant
 
 /**
- * Checks that the person who came back from installing the App can see [installationId] on GitHub, and returns the
- * account it is installed on. GitHub's Setup URL carries `installation_id` as a plain query parameter that anyone can
- * change, so it is never trusted alone: the `code` from "Request user authorization during installation" is exchanged
- * for a user token, and that user's installations must include it. The user token is used once and not kept.
+ * Checks that the person who came back from installing the App installed (or changed) [installationId] themselves,
+ * and returns the account it is installed on. GitHub's Setup URL carries `installation_id` as a plain query parameter
+ * that anyone can change, so it is never trusted alone:
+ * - the `code` from "Request user authorization during installation" is exchanged for a user token, and that user's
+ *   installations must include it. That list also holds installations of organisations where the user is only a
+ *   member or a collaborator, so:
+ * - the installation must have been created or updated after [since] (when this tenant started installing). A member
+ *   cannot make an organisation's owner install or change the App inside someone else's 15-minute window.
+ * The user token is used once, then revoked.
  */
 fun interface GitHubInstallationVerifier {
-    /** @throws InstallationNotVerified when the code is refused or the user cannot see the installation. */
-    fun accountOf(installationId: Long, code: String): String
+    /** @throws InstallationNotVerified when the code is refused, or the user did not just install or change it. */
+    fun accountOf(installationId: Long, code: String, since: Instant): String
 }
 
 @Component
@@ -47,8 +54,16 @@ class GitHubOAuthInstallationVerifier internal constructor(
         }
         .build()
 
-    override fun accountOf(installationId: Long, code: String): String {
+    override fun accountOf(installationId: Long, code: String, since: Instant): String {
         val token = userToken(code)
+        try {
+            return find(installationId, token, since)
+        } finally {
+            revoke(token)
+        }
+    }
+
+    private fun find(installationId: Long, token: String, since: Instant): String {
         for (page in 1..MAX_PAGES) {
             val installations = call {
                 client.get()
@@ -61,10 +76,35 @@ class GitHubOAuthInstallationVerifier internal constructor(
             }?.get("installations") as? List<*> ?: throw InstallationNotVerified()
             installations.filterIsInstance<Map<*, *>>()
                 .firstOrNull { (it["id"] as? Number)?.toLong() == installationId }
-                ?.let { found -> return ((found["account"] as? Map<*, *>)?.get("login") as? String) ?: throw InstallationNotVerified() }
+                ?.let { found ->
+                    if (!changedSince(found, since)) throw InstallationNotVerified()
+                    return ((found["account"] as? Map<*, *>)?.get("login") as? String) ?: throw InstallationNotVerified()
+                }
             if (installations.size < PAGE) break
         }
         throw InstallationNotVerified()
+    }
+
+    /** Created or updated after [since], less a minute of clock drift between GitHub and here. */
+    private fun changedSince(installation: Map<*, *>, since: Instant): Boolean =
+        listOf("created_at", "updated_at").mapNotNull { key ->
+            (installation[key] as? String)?.let { runCatching { Instant.parse(it) }.getOrNull() }
+        }.any { !it.isBefore(since.minus(CLOCK_DRIFT)) }
+
+    /** Best effort: the token expires anyway (the App must use expiring user tokens, DEPLOYMENT.md). */
+    private fun revoke(token: String) {
+        try {
+            client.method(org.springframework.http.HttpMethod.DELETE)
+                .uri("$API/applications/${settings.clientId}/token")
+                .headers { it.setBasicAuth(settings.clientId, settings.clientSecret) }
+                .header(HttpHeaders.ACCEPT, "application/vnd.github+json")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(mapOf("access_token" to token))
+                .retrieve()
+                .toBodilessEntity()
+        } catch (_: RuntimeException) {
+            // Nothing to do: the user token is not stored anywhere and expires on its own.
+        }
     }
 
     private fun userToken(code: String): String {
@@ -103,5 +143,6 @@ class GitHubOAuthInstallationVerifier internal constructor(
         const val MAX_PAGES = 5
         const val CONNECT_TIMEOUT_MS = 5_000
         const val READ_TIMEOUT_MS = 10_000
+        val CLOCK_DRIFT: java.time.Duration = java.time.Duration.ofMinutes(1)
     }
 }

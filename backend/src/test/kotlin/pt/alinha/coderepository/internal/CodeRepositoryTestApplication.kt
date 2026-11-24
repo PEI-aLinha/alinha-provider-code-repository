@@ -98,8 +98,10 @@ class FakeEmailService(private val tenants: TenantContext) : EmailService {
 class FakeInstallationVerifier : GitHubInstallationVerifier {
     val installations = ConcurrentHashMap<Pair<Long, String>, String>()
     @Volatile var down = false
+    @Volatile var lastSince: java.time.Instant? = null
 
-    override fun accountOf(installationId: Long, code: String): String {
+    override fun accountOf(installationId: Long, code: String, since: java.time.Instant): String {
+        lastSince = since
         if (down) throw GitHubUnavailable()
         return installations[installationId to code] ?: throw InstallationNotVerified()
     }

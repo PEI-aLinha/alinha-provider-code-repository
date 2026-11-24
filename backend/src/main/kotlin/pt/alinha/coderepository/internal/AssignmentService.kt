@@ -38,8 +38,11 @@ class AssignmentService(
     fun assign(input: AssignInput): AssignmentView {
         val email = input.validate()
         val now = Instant.now(clock)
+        val existing = assignments.findFirstBy()
+        // At most one email a minute per organisation: the endpoint must not become a way to send mail at will.
+        if (existing != null && existing.assignedAt.plus(RESEND_AFTER).isAfter(now)) throw TooManyInvites(RESEND_AFTER)
         // save() may merge (assigned id) and return another instance: keep working on the managed one.
-        val assignment = assignments.findFirstBy()?.apply { reassign(email, now) }
+        val assignment = existing?.apply { reassign(email, now) }
             ?: assignments.save(AssignmentEntity(UUID.randomUUID(), email, now))
         // The address is personal data: it stays in the assignment row, not in the audit trail.
         audit.record("code-repository.assigned", ENTITY_TYPE, assignment.id.toString())
@@ -61,5 +64,6 @@ class AssignmentService(
     private companion object {
         const val ENTITY_TYPE = "code_repository_assignment"
         const val TEMPLATE = "code-repository-assigned"
+        val RESEND_AFTER: java.time.Duration = java.time.Duration.ofMinutes(1)
     }
 }

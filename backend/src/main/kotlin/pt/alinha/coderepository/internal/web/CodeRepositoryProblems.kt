@@ -15,6 +15,10 @@ import pt.alinha.coderepository.internal.InvalidInstallState
 import pt.alinha.coderepository.internal.NotConnected
 import pt.alinha.coderepository.internal.SecretsUnavailable
 import pt.alinha.coderepository.internal.TokenRequired
+import pt.alinha.coderepository.internal.TooManyInvites
+import org.springframework.dao.DataIntegrityViolationException
+import org.springframework.http.HttpHeaders
+import org.springframework.http.ResponseEntity
 
 private val FIELD_MESSAGES = mapOf(
     "host" to "Escolha a plataforma onde está o código.",
@@ -63,7 +67,7 @@ class CodeRepositoryProblems {
     @ExceptionHandler
     fun notVerified(e: InstallationNotVerified) = problem(
         HttpStatus.UNPROCESSABLE_CONTENT, "APP_INSTALL_NOT_VERIFIED",
-        "Não foi possível confirmar que a aplicação foi instalada na sua conta do GitHub. Instale-a de novo a partir desta página.",
+        "Não foi possível confirmar que foi a sua conta a instalar a aplicação agora. Instale-a (ou altere-a) de novo a partir desta página.",
     )
 
     @ExceptionHandler
@@ -76,6 +80,16 @@ class CodeRepositoryProblems {
     fun githubUnavailable(e: GitHubUnavailable) = problem(
         HttpStatus.SERVICE_UNAVAILABLE, "GITHUB_UNAVAILABLE", "O GitHub não respondeu. Tente novamente dentro de alguns minutos.",
     )
+
+    @ExceptionHandler
+    fun tooManyInvites(e: TooManyInvites): ResponseEntity<ProblemDetail> = ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+        .header(HttpHeaders.RETRY_AFTER, e.retryAfter.seconds.toString())
+        .body(problem(HttpStatus.TOO_MANY_REQUESTS, "TOO_MANY_INVITES", "Acabou de enviar um pedido. Aguarde um minuto antes de enviar outro."))
+
+    /** Two requests for the same organisation at once (one row per tenant). */
+    @ExceptionHandler
+    fun duplicate(e: DataIntegrityViolationException) =
+        problem(HttpStatus.CONFLICT, "CONCURRENT_CHANGE", "A ligação foi alterada noutro lado. Atualize a página.")
 
     @ExceptionHandler
     fun concurrent(e: ObjectOptimisticLockingFailureException) =

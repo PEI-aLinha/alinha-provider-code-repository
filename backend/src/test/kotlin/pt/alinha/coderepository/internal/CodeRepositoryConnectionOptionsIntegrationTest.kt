@@ -127,7 +127,7 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
     }
 
     @Test
-    fun `the schedule waits while a collection is running`() {
+    fun `the schedule tries again soon when a collection is running`() {
         connect()
         val running = lastJob()
         makeDue()
@@ -135,7 +135,7 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
         outsideRequest { scheduler.runDue() }
 
         assertThat(lastJob()).isEqualTo(running)
-        assertThat(nextRunAt()).isAfter(Instant.now())
+        assertThat(nextRunAt()).isBetween(Instant.now().plusSeconds(10 * 60), Instant.now().plusSeconds(20 * 60))
     }
 
     @Test
@@ -189,9 +189,11 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
             status { isUnprocessableContent() }
             jsonPath("$.code") { value("APP_INSTALL_NOT_VERIFIED") }
         }
+        // GitHub is only asked about installations made or changed since this attempt started.
+        assertThat(verifier.lastSince).isBetween(Instant.now().minusSeconds(60), Instant.now())
         completeInstall(42, state, "code-1").andExpect { jsonPath("$.code") { value("APP_INSTALL_EXPIRED") } }
         call("responsible") { mvc.get("$BASE/connection") { it() } }.andExpect { status { isNoContent() } }
-        assertThat(audit("code-repository.app-install-refused")).isEmpty()
+        assertThat(audit("code-repository.app-install-refused")).hasSize(1)
     }
 
     @Test
@@ -204,7 +206,7 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
     }
 
     @Test
-    fun `GitHub not answering is a 503`() {
+    fun `GitHub not answering is a 503 and keeps the attempt open`() {
         val state = startInstall()
         verifier.down = true
 
@@ -212,6 +214,22 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
             status { isServiceUnavailable() }
             jsonPath("$.code") { value("GITHUB_UNAVAILABLE") }
         }
+
+        verifier.down = false
+        verifier.installations[42L to "code-2"] = "acme"
+        completeInstall(42, state, "code-2").andExpect { status { isAccepted() } }
+    }
+
+    @Test
+    fun `a collection running keeps the attempt open`() {
+        connect()
+        val state = startInstall()
+        verifier.installations[42L to "c"] = "acme"
+
+        completeInstall(42, state, "c").andExpect { status { isConflict() } }
+
+        complete(lastJob().id, result())
+        completeInstall(42, state, "c").andExpect { status { isAccepted() } }
     }
 
     @Test
@@ -246,6 +264,25 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
 
         call("responsible") { mvc.delete("$BASE/assignment") { it() } }.andExpect { status { isNoContent() } }
         call("responsible") { mvc.get("$BASE/setup") { it() } }.andExpect { jsonPath("$.assignment") { doesNotExist() } }
+    }
+
+    @Test
+    fun `one invite a minute per organisation, and connecting ends the request`() {
+        call("responsible") { assign("ana@acme.pt", it) }.andExpect { status { isOk() } }
+        call("responsible") { assign("rui@acme.pt", it) }.andExpect {
+            status { isTooManyRequests() }
+            header { string("Retry-After", "60") }
+        }
+        assertThat(emails.sent.filter { it.tenant == tenantId() }).hasSize(1)
+
+        connect()
+        call("responsible") { mvc.get("$BASE/setup") { it() } }.andExpect { jsonPath("$.assignment") { doesNotExist() } }
+        assertThat(audit("code-repository.unassigned")).hasSize(1)
+    }
+
+    @Test
+    fun `an address that could add recipients is refused`() {
+        call("responsible") { assign("ana,rui@acme.pt", it) }.andExpect { status { isUnprocessableContent() } }
     }
 
     @Test
