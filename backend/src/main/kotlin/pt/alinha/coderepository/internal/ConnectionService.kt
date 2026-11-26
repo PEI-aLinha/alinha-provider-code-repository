@@ -248,8 +248,8 @@ class ConnectionService(
     fun evidence(evidenceId: UUID): EvidenceEntity? = evidence.findById(evidenceId).orElse(null)
 
     private fun clearAssignment() {
-        val assignment = assignments.findFirstBy() ?: return
-        assignments.delete(assignment)
+        val assignment = assignments.findFirstBy()?.takeIf { it.isAssigned } ?: return
+        assignment.unassign() // keeps the time of the last invite (AssignmentService's limit)
         audit.record("code-repository.unassigned", "code_repository_assignment", assignment.id.toString())
     }
 

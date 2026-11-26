@@ -301,6 +301,30 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
     }
 
     @Test
+    fun `unassigning, connecting or disconnecting does not reset the one-invite-a-minute limit`() {
+        call("responsible") { assign("ana@acme.pt", it) }.andExpect { status { isOk() } }
+        call("responsible") { mvc.delete("$BASE/assignment") { it() } }.andExpect { status { isNoContent() } }
+        call("responsible") { assign("ana@acme.pt", it) }.andExpect { status { isTooManyRequests() } }
+
+        connect()
+        call("responsible") { assign("ana@acme.pt", it) }.andExpect { status { isTooManyRequests() } }
+        complete(lastJob().id, result())
+        call("responsible") { mvc.delete("$BASE/connection") { it() } }.andExpect { status { isNoContent() } }
+        call("responsible") { assign("ana@acme.pt", it) }.andExpect { status { isTooManyRequests() } }
+        assertThat(emails.sent.filter { it.tenant == tenantId() }).hasSize(1)
+
+        // The address is gone once unassigned; only when the last invite was sent stays.
+        assertThat(jdbc.queryForObject(
+            "select count(*) from coderepository.assignment where tenant_id = ?::uuid and email is null", Int::class.java, tenant,
+        )).isOne()
+        jdbc.update(
+            "update coderepository.assignment set assigned_at = now() - interval '2 minutes' where tenant_id = ?::uuid", tenant,
+        )
+        call("responsible") { assign("rui@acme.pt", it) }.andExpect { status { isOk() } }
+        call("responsible") { mvc.get("$BASE/setup") { it() } }.andExpect { jsonPath("$.assignment.email") { value("rui@acme.pt") } }
+    }
+
+    @Test
     fun `an address that could add recipients is refused`() {
         call("responsible") { assign("ana,rui@acme.pt", it) }.andExpect { status { isUnprocessableContent() } }
     }

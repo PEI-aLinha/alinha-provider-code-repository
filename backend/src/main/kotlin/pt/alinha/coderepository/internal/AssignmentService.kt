@@ -31,7 +31,8 @@ class AssignmentService(
     fun setup(): SetupView = SetupView(githubApp = app.available, assignment = assignment())
 
     @Transactional(readOnly = true)
-    fun assignment(): AssignmentView? = assignments.findFirstBy()?.let { AssignmentView(it.email, it.assignedAt) }
+    fun assignment(): AssignmentView? =
+        assignments.findFirstBy()?.let { row -> row.email?.let { AssignmentView(it, row.assignedAt) } }
 
     /** Saves who was asked and queues the email in the same transaction (the outbox sends it after commit). */
     @Transactional
@@ -39,7 +40,8 @@ class AssignmentService(
         val email = input.validate()
         val now = Instant.now(clock)
         val existing = assignments.findFirstBy()
-        // At most one email a minute per organisation: the endpoint must not become a way to send mail at will.
+        // At most one email a minute per organisation: the endpoint must not become a way to send mail at will. The row
+        // outlives an unassign (AssignmentEntity), so deleting and assigning again does not reset the limit.
         if (existing != null && existing.assignedAt.plus(RESEND_AFTER).isAfter(now)) throw TooManyInvites(RESEND_AFTER)
         // save() may merge (assigned id) and return another instance: keep working on the managed one.
         val assignment = existing?.apply { reassign(email, now) }
@@ -51,13 +53,13 @@ class AssignmentService(
         } catch (_: IllegalArgumentException) {
             throw InvalidInput("email") // an address the mail library refuses
         }
-        return AssignmentView(assignment.email, assignment.assignedAt)
+        return AssignmentView(email, assignment.assignedAt)
     }
 
     @Transactional
     fun unassign() {
-        val assignment = assignments.findFirstBy() ?: return
-        assignments.delete(assignment)
+        val assignment = assignments.findFirstBy()?.takeIf { it.isAssigned } ?: return
+        assignment.unassign()
         audit.record("code-repository.unassigned", ENTITY_TYPE, assignment.id.toString())
     }
 

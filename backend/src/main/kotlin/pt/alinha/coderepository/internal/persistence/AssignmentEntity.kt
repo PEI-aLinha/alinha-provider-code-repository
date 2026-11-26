@@ -10,7 +10,10 @@ import pt.alinha.core.tenant.TenantOwnedEntity
 import java.time.Instant
 import java.util.UUID
 
-/** The person the responsible asked, by email, to connect the repository. Who asked is in the audit trail. */
+/**
+ * The person the responsible asked, by email, to connect the repository. Who asked is in the audit trail. Unassigning
+ * clears [email] but keeps the row, so [assignedAt] (the last invite) still limits how often an email can be sent.
+ */
 @Entity
 @Table(schema = "coderepository", name = "assignment")
 class AssignmentEntity(
@@ -22,17 +25,26 @@ class AssignmentEntity(
     var version: Long = 0
         protected set
 
-    @Column(nullable = false)
-    var email: String = email
+    /** Null once unassigned. */
+    @Column
+    var email: String? = email
         protected set
 
+    /** When the last invite was sent. */
     @Column(name = "assigned_at", nullable = false)
     var assignedAt: Instant = assignedAt
         protected set
 
+    val isAssigned: Boolean get() = email != null
+
     fun reassign(email: String, at: Instant) {
         this.email = email
         assignedAt = at
+    }
+
+    /** Forgets the address (personal data) and keeps when the last invite was sent. */
+    fun unassign() {
+        email = null
     }
 }
 
