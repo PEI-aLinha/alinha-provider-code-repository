@@ -23,7 +23,7 @@ import java.util.UUID
 /**
  * Connecting through the aLinha GitHub App:
  * 1. [start] keeps the hash of a random `state` for this tenant and returns GitHub's install page with it.
- * 2. GitHub sends the person back to `/resume` (the App's Setup URL) with `installation_id`, `state` and `code`; the
+ * 2. GitHub sends the person back to `/resume` (the App's Callback URL) with `installation_id`, `state` and `code`; the
  *    shell returns them to the plugin page, which sends them to [complete].
  * 3. [complete] uses the state once (it binds the return to the tenant that started), checks with the code that the
  *    person can see the installation (never trusting the id alone), then connects.

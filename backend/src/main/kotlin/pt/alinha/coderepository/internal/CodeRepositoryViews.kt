@@ -118,7 +118,7 @@ data class AssignInput(val email: String?) {
 /** `POST /api/code-repository/github-app/installations`: where to send the person to install the App. */
 data class AppInstallStart(val installUrl: String)
 
-/** `PUT /api/code-repository/github-app/installation`: what GitHub sent back to the Setup URL. */
+/** `PUT /api/code-repository/github-app/installation`: what GitHub sent back to the Callback URL. */
 data class AppInstallInput(val installationId: Long?, val state: String?, val code: String?) {
     override fun toString() = "AppInstallInput(installationId=$installationId, state=***, code=***)"
 }

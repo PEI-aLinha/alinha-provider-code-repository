@@ -16,8 +16,8 @@ import java.time.Instant
 
 /**
  * Checks that the person who came back from installing the App installed (or changed) [installationId] themselves,
- * and returns the account it is installed on. GitHub's Setup URL carries `installation_id` as a plain query parameter
- * that anyone can change, so it is never trusted alone:
+ * and returns the account it is installed on. GitHub's Callback URL carries `installation_id` as a plain query
+ * parameter that anyone can change, so it is never trusted alone:
  * - the `code` from "Request user authorization during installation" is exchanged for a user token, and that user's
  *   installations must include it. That list also holds installations of organisations where the user is only a
  *   member or a collaborator, so:
