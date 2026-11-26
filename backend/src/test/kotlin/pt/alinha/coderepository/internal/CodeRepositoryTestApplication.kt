@@ -99,9 +99,12 @@ class FakeInstallationVerifier : GitHubInstallationVerifier {
     val installations = ConcurrentHashMap<Pair<Long, String>, String>()
     @Volatile var down = false
     @Volatile var lastSince: java.time.Instant? = null
+    /** Runs while GitHub is being asked, before it answers (a second return arriving meanwhile). */
+    @Volatile var whileAsking: (() -> Unit)? = null
 
     override fun accountOf(installationId: Long, code: String, since: java.time.Instant): String {
         lastSince = since
+        whileAsking?.also { whileAsking = null }?.invoke()
         if (down) throw GitHubUnavailable()
         return installations[installationId to code] ?: throw InstallationNotVerified()
     }

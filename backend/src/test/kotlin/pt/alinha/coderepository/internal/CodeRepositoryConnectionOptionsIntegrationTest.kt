@@ -59,6 +59,7 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
     fun newTenant() {
         tenant = UUID.randomUUID().toString()
         verifier.down = false
+        verifier.whileAsking = null
     }
 
     // -- GitLab -------------------------------------------------------------------------------------------------
@@ -194,6 +195,25 @@ class CodeRepositoryConnectionOptionsIntegrationTest {
         completeInstall(42, state, "code-1").andExpect { jsonPath("$.code") { value("APP_INSTALL_EXPIRED") } }
         call("responsible") { mvc.get("$BASE/connection") { it() } }.andExpect { status { isNoContent() } }
         assertThat(audit("code-repository.app-install-refused")).hasSize(1)
+    }
+
+    @Test
+    fun `a return replayed while the first is still with GitHub is refused, and only one connects`() {
+        val state = startInstall()
+        verifier.installations[42L to "code-1"] = "acme"
+        var replay = ""
+        verifier.whileAsking = {
+            // Another thread: like a second request, it waits on nothing the first one holds.
+            val second = Thread { replay = completeInstall(42, state, "code-1").andReturn().response.contentAsString }
+            second.start()
+            second.join(10_000)
+        }
+
+        completeInstall(42, state, "code-1").andExpect { status { isAccepted() } }
+
+        assertThat(replay).contains("APP_INSTALL_EXPIRED")
+        assertThat(audit("code-repository.connected")).hasSize(1)
+        assertThat(jobs.dispatched.count { it.tenant == tenantId() }).isOne()
     }
 
     @Test

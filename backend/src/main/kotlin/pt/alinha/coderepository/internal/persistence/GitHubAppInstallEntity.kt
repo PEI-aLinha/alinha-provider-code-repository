@@ -6,6 +6,8 @@ import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.Version
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Modifying
+import org.springframework.data.jpa.repository.Query
 import pt.alinha.core.tenant.TenantOwnedEntity
 import java.time.Instant
 import java.util.UUID
@@ -39,4 +41,12 @@ class GitHubAppInstallEntity(
 
 interface GitHubAppInstallRepository : JpaRepository<GitHubAppInstallEntity, UUID> {
     fun findFirstBy(): GitHubAppInstallEntity?
+
+    /**
+     * Uses the attempt up in one statement: 1 when this call deleted it, 0 when it is gone, expired or another call
+     * claimed it first (the row lock makes a concurrent delete wait, then find nothing).
+     */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("delete from GitHubAppInstallEntity i where i.id = :id and i.stateHash = :stateHash and i.expiresAt > :now")
+    fun claim(id: UUID, stateHash: String, now: Instant): Int
 }
