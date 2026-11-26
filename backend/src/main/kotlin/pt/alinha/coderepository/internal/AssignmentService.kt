@@ -1,0 +1,74 @@
+package pt.alinha.coderepository.internal
+
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+import pt.alinha.coderepository.internal.github.GitHubAppSettings
+import pt.alinha.coderepository.internal.persistence.AssignmentEntity
+import pt.alinha.coderepository.internal.persistence.AssignmentRepository
+import pt.alinha.core.audit.AuditTrail
+import pt.alinha.notifications.api.EmailService
+import java.time.Clock
+import java.time.Instant
+import java.util.UUID
+
+/**
+ * The responsible person asks someone (usually the analyst who looks after the code) to connect the repository: the
+ * page shows "Atribuído a …" and that person gets an email with a link to the platform. Connecting still needs the
+ * `code-repository:connect` permission: the email grants nothing.
+ * The address is open on purpose in the MVP: the person asked is often not a platform user yet. What bounds the abuse
+ * is the permission to assign, one email a minute per organisation, and a fixed template with only a link to the
+ * platform (no text from the sender).
+ */
+@Service
+class AssignmentService(
+    private val assignments: AssignmentRepository,
+    private val emails: EmailService,
+    private val audit: AuditTrail,
+    private val app: GitHubAppSettings,
+    @Value("\${ALINHA_PUBLIC_URL:http://localhost:5173}") private val publicUrl: String,
+    private val clock: Clock = Clock.systemUTC(),
+) {
+
+    @Transactional(readOnly = true)
+    fun setup(): SetupView = SetupView(githubApp = app.available, assignment = assignment())
+
+    @Transactional(readOnly = true)
+    fun assignment(): AssignmentView? =
+        assignments.findFirstBy()?.let { row -> row.email?.let { AssignmentView(it, row.assignedAt) } }
+
+    /** Saves who was asked and queues the email in the same transaction (the outbox sends it after commit). */
+    @Transactional
+    fun assign(input: AssignInput): AssignmentView {
+        val email = input.validate()
+        val now = Instant.now(clock)
+        val existing = assignments.findFirstBy()
+        // At most one email a minute per organisation: the endpoint must not become a way to send mail at will. The row
+        // outlives an unassign (AssignmentEntity), so deleting and assigning again does not reset the limit.
+        if (existing != null && existing.assignedAt.plus(RESEND_AFTER).isAfter(now)) throw TooManyInvites(RESEND_AFTER)
+        // save() may merge (assigned id) and return another instance: keep working on the managed one.
+        val assignment = existing?.apply { reassign(email, now) }
+            ?: assignments.save(AssignmentEntity(UUID.randomUUID(), email, now))
+        // The address is personal data: it stays in the assignment row, not in the audit trail.
+        audit.record("code-repository.assigned", ENTITY_TYPE, assignment.id.toString())
+        try {
+            emails.send(email, TEMPLATE, mapOf("link" to publicUrl.trimEnd('/') + "/"))
+        } catch (_: IllegalArgumentException) {
+            throw InvalidInput("email") // an address the mail library refuses
+        }
+        return AssignmentView(email, assignment.assignedAt)
+    }
+
+    @Transactional
+    fun unassign() {
+        val assignment = assignments.findFirstBy()?.takeIf { it.isAssigned } ?: return
+        assignment.unassign()
+        audit.record("code-repository.unassigned", ENTITY_TYPE, assignment.id.toString())
+    }
+
+    private companion object {
+        const val ENTITY_TYPE = "code_repository_assignment"
+        const val TEMPLATE = "code-repository-assigned"
+        val RESEND_AFTER: java.time.Duration = java.time.Duration.ofMinutes(1)
+    }
+}

@@ -1,12 +1,17 @@
 # The provider's "worker" part: read-only Python collector, runs in the Worker Runtime.
+# Runs inside the job consumer's image, which provides `alinha_job_consumer`
+# (TransientError, CollectorError, credentials). Tests put the main repo's workers/job_consumer/src on the path.
 [project]
 name = "alinha-code-repository"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["PyJWT[crypto]>=2.8"]  # GitHub App tokens (RS256)
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+[project.entry-points."alinha.collectors"]
+code-repository = "alinha_coderepository.collector:collect"
 
 [build-system]
 requires = ["setuptools>=68"]

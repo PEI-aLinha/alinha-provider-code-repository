@@ -12,10 +12,20 @@ dependencies {
 
     implementation(project(":plugin-api"))
     implementation(project(":core"))
+    // Email invite to the person asked to connect the repository: only pt.alinha.notifications.api.EmailService
+    implementation(project(":notifications"))
 
     implementation(libs.spring.boot.starter.webmvc)
     implementation(libs.spring.boot.starter.data.jpa)
     implementation(libs.spring.modulith.starter.core)
 
     testImplementation(libs.spring.boot.starter.test)
+    // Integration test: real core RBAC, tenant and audit beans on PostgreSQL (CodeRepositoryIntegrationTest)
+    testImplementation(libs.spring.boot.starter.webmvc.test)
+    testImplementation(libs.spring.boot.starter.security.oauth2.resource.server)
+    testImplementation(libs.spring.boot.starter.flyway)
+    testImplementation(libs.testcontainers.junit.jupiter)
+    testImplementation(libs.testcontainers.postgresql)
+    testRuntimeOnly(libs.flyway.postgresql)
+    testRuntimeOnly(libs.postgresql)
 }
