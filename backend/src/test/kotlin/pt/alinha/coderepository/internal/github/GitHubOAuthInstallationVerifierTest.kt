@@ -90,6 +90,16 @@ class GitHubOAuthInstallationVerifierTest {
     }
 
     @Test
+    fun `an installation created long before but changed inside the window is verified (the accepted residual risk)`() {
+        tokenAnswer()
+        // created_at is 2025: an App already installed, changed on GitHub after this attempt started.
+        installations(1, """{"installations": [${installation(42, "acme", updated = "2026-11-24T10:01:00Z")}]}""")
+        revoked()
+
+        assertThat(verifier.accountOf(42, "abc", since)).isEqualTo("acme")
+    }
+
+    @Test
     fun `a used or forged code is not verified`() {
         tokenAnswer("""{"error": "bad_verification_code"}""")
 

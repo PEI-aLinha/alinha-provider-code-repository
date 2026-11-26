@@ -23,6 +23,11 @@ import java.time.Instant
  *   member or a collaborator, so:
  * - the installation must have been created or updated after [since] (when this tenant started installing). A member
  *   cannot make an organisation's owner install or change the App inside someone else's 15-minute window.
+ *   `updated_at` counts so that an App already installed can be connected again by changing it on GitHub (after a
+ *   disconnect, or from another tenant). Residual risk, accepted for the MVP: `updated_at` also moves for changes the
+ *   member did not make (an owner editing repository access, a suspension, new permissions). A member who sees the
+ *   installation and returns with its id inside such a change's window can bind it to their tenant. The repositories
+ *   it then collects are read-only and ones that member can already see on GitHub.
  * The user token is used once, then revoked.
  */
 fun interface GitHubInstallationVerifier {
