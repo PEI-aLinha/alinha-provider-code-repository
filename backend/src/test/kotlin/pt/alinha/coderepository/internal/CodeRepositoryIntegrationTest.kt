@@ -263,6 +263,28 @@ class CodeRepositoryIntegrationTest {
     }
 
     @Test
+    fun `changing the repositories hides the previous collection's evidence, even when the new one fails`() {
+        connect(repositories = listOf("acme/api", "acme/web"))
+        complete(lastJob().id, collectionResult())
+
+        connect(token = null, repositories = listOf("acme/web")).andExpect { status { isAccepted() } }
+        call("responsible") { mvc.get(EVIDENCE) { it() } }.andExpect { jsonPath("$.length()") { value(0) } }
+
+        fail(lastJob().id, "invalid_credentials")
+        call("responsible") { mvc.get(EVIDENCE) { it() } }.andExpect { jsonPath("$.length()") { value(0) } }
+    }
+
+    @Test
+    fun `the same repositories in another order or case keep the evidence`() {
+        connect(repositories = listOf("acme/api", "acme/web"))
+        complete(lastJob().id, collectionResult())
+
+        connect(token = null, repositories = listOf("Acme/Web", "acme/api")).andExpect { status { isAccepted() } }
+
+        call("responsible") { mvc.get(EVIDENCE) { it() } }.andExpect { jsonPath("$.length()") { value(3) } }
+    }
+
+    @Test
     fun `another plugin's job is ignored`() {
         connect()
         val jobId = lastJob().id

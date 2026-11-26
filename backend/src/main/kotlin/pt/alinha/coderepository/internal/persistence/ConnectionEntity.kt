@@ -120,9 +120,14 @@ class ConnectionEntity(
 
     fun sameAccount(other: Target): Boolean = sameServer(other) && other.account.equals(account, ignoreCase = true)
 
+    /** The same account and the same repositories (in any order or case): the last collection still covers it. */
+    fun sameScope(other: Target): Boolean =
+        sameAccount(other) && other.repositories.lowercased() == repositories.lowercased()
+
     fun reconfigure(target: Target, at: Instant) {
-        // Evidence of another account is not this connection's picture any more.
-        if (!sameAccount(target)) {
+        // Evidence of another account, or of repositories no longer (or not yet) in scope, is not this connection's
+        // picture any more: hide it until a collection of the new scope completes.
+        if (!sameScope(target)) {
             collectedJobId = null
             lastCollectedAt = null
         }
@@ -160,3 +165,5 @@ class ConnectionEntity(
         lastError = errorCode
     }
 }
+
+private fun List<String>.lowercased(): Set<String> = mapTo(HashSet()) { it.lowercase() }
