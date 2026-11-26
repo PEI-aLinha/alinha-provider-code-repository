@@ -179,6 +179,18 @@ class CodeRepositoryIntegrationTest {
         call("responsible") { mvc.get(EVIDENCE) { it() } }.andExpect { jsonPath("$.length()") { value(0) } }
     }
 
+    @Test
+    fun `another tenant gets nothing for this tenant's evidence id`() {
+        connect()
+        complete(lastJob().id, collectionResult())
+        val evidenceId = announcedFor(tenant).first().evidenceId
+
+        val other = TenantId(UUID.randomUUID())
+
+        assertThat(outsideRequest { tenants.runAs(other) { api.evidence(evidenceId) } }).isNull()
+        assertThat(outsideRequest { tenants.runAs(tenantId()) { api.evidence(evidenceId) } }).isNotNull()
+    }
+
     // -- results ------------------------------------------------------------------------------------------------
 
     @Test
