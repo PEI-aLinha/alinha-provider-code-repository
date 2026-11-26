@@ -336,6 +336,21 @@ class CodeRepositoryIntegrationTest {
         call("responsible") { mvc.delete(CONNECTION) { it() } }.andExpect { status { isNotFound() } }
     }
 
+    @Test
+    fun `a collection that completes after disconnecting is ignored`() {
+        connect()
+        val running = lastJob().id
+
+        call("responsible") { mvc.delete(CONNECTION) { it() } }.andExpect { status { isNoContent() } }
+        complete(running, collectionResult())
+
+        assertThat(countEvidence()).isZero()
+        assertThat(announcedFor(tenant)).isEmpty()
+        assertThat(audit("code-repository.evidence-collected")).isEmpty()
+        call("responsible") { mvc.get(EVIDENCE) { it() } }.andExpect { jsonPath("$.length()") { value(0) } }
+        call("responsible") { mvc.get(CONNECTION) { it() } }.andExpect { status { isNoContent() } }
+    }
+
     // -- helpers ------------------------------------------------------------------------------------------------
 
     private fun call(role: String, request: ((org.springframework.test.web.servlet.MockHttpServletRequestDsl.() -> Unit)) -> ResultActionsDsl) =
