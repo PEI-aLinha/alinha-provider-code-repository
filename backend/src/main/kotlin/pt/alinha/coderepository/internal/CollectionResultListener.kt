@@ -42,7 +42,7 @@ class CollectionResultListener(
             // An async listener's exception is only logged by the executor: mark the collection failed instead of
             // leaving it PENDING. The log has the job id, never the result (untrusted, may be large).
             log.error("could not apply the result of job {}", event.jobId, e)
-            tenants.runAs(event) { tx.executeWithoutResult { service.applyFailure(event.jobId, ConnectionService.GENERIC_ERROR) } }
+            markFailed(event)
         }
     }
 
@@ -52,6 +52,18 @@ class CollectionResultListener(
         if (!isOurs(event.requestedBy, event.type)) return
         tenants.runAs(event) {
             tx.executeWithoutResult { service.applyFailure(event.jobId, event.error.code) }
+        }
+    }
+
+    /**
+     * The fallback can fail too (the database is down, a concurrent connect changed the row): log it and stop. The
+     * collection then stays PENDING until COLLECTION_DEADLINE, after which a new one may start.
+     */
+    private fun markFailed(event: JobCompleted) {
+        try {
+            tenants.runAs(event) { tx.executeWithoutResult { service.applyFailure(event.jobId, ConnectionService.GENERIC_ERROR) } }
+        } catch (e: RuntimeException) {
+            log.error("could not mark job {} as failed either", event.jobId, e)
         }
     }
 
