@@ -16,6 +16,9 @@ import java.util.UUID
  * The responsible person asks someone (usually the analyst who looks after the code) to connect the repository: the
  * page shows "Atribuído a …" and that person gets an email with a link to the platform. Connecting still needs the
  * `code-repository:connect` permission: the email grants nothing.
+ * The address is open on purpose in the MVP: the person asked is often not a platform user yet. What bounds the abuse
+ * is the permission to assign, one email a minute per organisation, and a fixed template with only a link to the
+ * platform (no text from the sender).
  */
 @Service
 class AssignmentService(
