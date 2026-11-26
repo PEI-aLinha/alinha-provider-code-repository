@@ -66,6 +66,7 @@ class CodeRepositoryIntegrationTest {
     fun newTenant() {
         tenant = UUID.randomUUID().toString()
         secrets.failOnPut = false
+        secrets.failOnDelete = false
     }
 
     // -- connect ------------------------------------------------------------------------------------------------
@@ -346,6 +347,20 @@ class CodeRepositoryIntegrationTest {
         assertThat(countEvidence()).isEqualTo(3)
         assertThat(audit("code-repository.disconnected")).hasSize(1)
         call("responsible") { mvc.delete(CONNECTION) { it() } }.andExpect { status { isNotFound() } }
+    }
+
+    @Test
+    fun `when OpenBao refuses to delete the token the connection stays`() {
+        connect()
+        complete(lastJob().id, collectionResult())
+        secrets.failOnDelete = true
+
+        // MockMvc rethrows what no handler answers; the app answers 500.
+        runCatching { call("responsible") { mvc.delete(CONNECTION) { it() } } }
+
+        assertThat(secrets.stored).containsKey(tenantId() to "code-repository")
+        call("responsible") { mvc.get(CONNECTION) { it() } }.andExpect { jsonPath("$.status") { value("ACTIVE") } }
+        assertThat(audit("code-repository.disconnected")).isEmpty()
     }
 
     @Test

@@ -49,6 +49,7 @@ import java.util.concurrent.ConcurrentHashMap
 class FakeSecretStore(private val tenants: TenantContext) : TenantSecretStore {
     val stored = ConcurrentHashMap<Pair<TenantId, String>, Map<String, String>>()
     @Volatile var failOnPut = false
+    @Volatile var failOnDelete = false
 
     override fun put(provider: String, secret: Map<String, String>) {
         if (failOnPut) error("OpenBao refused")
@@ -58,6 +59,7 @@ class FakeSecretStore(private val tenants: TenantContext) : TenantSecretStore {
     override fun get(provider: String) = stored[tenants.current() to provider]
 
     override fun delete(provider: String) {
+        if (failOnDelete) error("OpenBao refused")
         stored.remove(tenants.current() to provider)
     }
 }

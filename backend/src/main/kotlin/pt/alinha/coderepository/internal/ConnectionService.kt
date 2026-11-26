@@ -119,7 +119,11 @@ class ConnectionService(
         startCollection(connection, now, scheduled = true)
     }
 
-    /** Removes the connection, its schedule and the stored credential. Evidence already collected stays. */
+    /**
+     * Removes the connection, its schedule and the stored credential. Evidence already collected stays. Without OpenBao
+     * configured nothing can have been stored, so disconnecting still works; an OpenBao that refuses the delete rolls
+     * everything back, so a credential never outlives its connection unnoticed.
+     */
     @Transactional
     fun disconnect() {
         val connection = connections.findFirstBy() ?: throw NotConnected()
@@ -127,7 +131,7 @@ class ConnectionService(
         schedules.findById(tenants.current().value).ifPresent(schedules::delete)
         audit.record("code-repository.disconnected", ENTITY_TYPE, connection.id.toString())
         clearAssignment()
-        secrets().delete(CodeRepositoryPlugin.ID)
+        secretStore.ifAvailable?.delete(CodeRepositoryPlugin.ID)
     }
 
     private fun save(
